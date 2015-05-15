@@ -1,45 +1,11 @@
 <html>
-<head><title>WebGL Sketchbook</title>
-<style>
-  body {
-    background-color: #666;
-    color: #bbb;
-    font-family: andale mono, helvetica, arial;
-    font-size: 18px;
-    line-height: 36px;
-  }
-
-  html, body, canvas { margin:0; width: 100%; height:100%; overflow: hidden;}
-
-  canvas {
-    position: absolute;
-  }
-
-  ul {
-    position: relative;
-    margin: 5%;
-    list-style: none;
-    padding: 0;
-  }
-
-  a {
-    color: #b11;
-    font-weight: bold;
-    text-decoration: none;
-  }
-</style>
-
-  </head>
-<body>
-  <canvas id="c">
-  </canvas>
-  <ul>
-    <li>004 - <a href="004-rects.html">Rects</a>: backgrounds</li>
-    <li>003 - <a href="003-dark-desert.html">Dark Desert</a>: tiling a plane, lighting</li>
-    <li>002 - <a href="002-gradiwave.html">Gradiwave</a>: noise</li>
-    <li>001 - <a href="001-webcam-gl.html">WebCam/GL</a> user media texture</li>
-  </ul>
-
+  <head>
+    <title>Rects</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style type="text/css">
+      html, body, canvas { margin:0; width: 100%; height:100%; overflow: hidden;}
+      video {position: absolute;}
+    </style>
     <script src="sylvester.js" type="text/javascript"></script>
     <script src="glUtils.js" type="text/javascript"></script>
     <script id="shader-fs" type="x-shader/x-fragment">
@@ -131,6 +97,13 @@
         gl_Position = uPMatrix * uMVMatrix * vec4(position, 1.0);
       }
     </script>
+  </head>
+
+  <body>
+    <canvas id="c">
+      Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
+    </canvas>
+  </body>
   <script>
 var canvas;
 var gl;
@@ -323,5 +296,5 @@ function getShader(gl, id) {
   return shader;
 }
 
-  </script></body>
+  </script>
 </html>
