@@ -18,18 +18,30 @@
       uniform sampler2D video;
       uniform float width;
       uniform float height;
+      uniform float kernel[36];
 
       void main(void) {
         if (distance(gl_FragCoord.st, vec2(0.5)) > 1.5*height) {
           discard;
         }
-        vec4 color = texture2D(video, gl_FragCoord.st*vec2(.75,-1.0) / height * 1.4 + vec2(0.0,1.0));
-        color *=  vec4(0.9,.7,2.0,1.0);
+
+        vec2 v_texCoord = gl_FragCoord.st*vec2(.75,-1.0) / height * 1.15 + vec2(0.0,1.0);
+
+        vec2 onePixel = vec2(1.0/320.0, 1.0/240.0);
+        vec4 colorSum = vec4(0.0);
+        for (int i=-2; i<3; i++) {
+          for (int j=-2; j<3; j++) {
+            colorSum += texture2D(video, v_texCoord + onePixel * vec2(i, j)) * kernel[5*i+j];
+          }
+        }
+        vec4 color = vec4(colorSum.rgb,1.0);
+        color *=  vec4(1.6,1.4,4.0,1.0);
         color *= color;
         color *= 2.0*color;
         color *= 4.0*color;
-        color *= 8.0*color;
+        color *= 16.0*color;
         gl_FragColor = color.rbga;
+//        gl_FragColor = texture2D(video, gl_FragCoord.st*vec2(.75,-1.0) / height * 1.4 + vec2(0.0,1.0));
       }
     </script>
 
@@ -109,6 +121,13 @@ function start() {
   }
 }
 
+var kernel = [];
+for (var i=0; i<5; i++) for (var j=0; j<5; j++)
+  kernel.push(Math.sqrt((2-i)*(2-i) + (2-j)*(2-j)) < 2.5 ? 1.0 : 0.0);
+  // kernel.push(Math.max(0, 2.5 - Math.sqrt((2-i)*(2-i) + (2-j)*(2-j))));
+var kernelsum = kernel.reduce(function(m,s) { return m+s;}, 0);
+kernel = kernel.map(function(v) { return v/kernelsum; });
+
 function render() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
@@ -126,6 +145,7 @@ function render() {
 
   gl.uniform1f( gl.getUniformLocation(shaderProgram, "width"), canvas.width);
   gl.uniform1f( gl.getUniformLocation(shaderProgram, "height"), canvas.height);
+  gl.uniform1fv( gl.getUniformLocation(shaderProgram, "kernel"), new Float32Array(kernel));
 
   gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
   gl.vertexAttribPointer(coordAttribute, 2, gl.FLOAT, false, 0, 0);
