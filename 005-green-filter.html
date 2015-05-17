@@ -27,7 +27,7 @@
 
         vec2 v_texCoord = gl_FragCoord.st*vec2(.75,-1.0) / height * 1.15 + vec2(0.0,1.0);
 
-        vec2 onePixel = vec2(1.0/320.0, 1.0/240.0);
+        vec2 onePixel = vec2(1.0/160.0, 1.0/120.0);
         vec4 colorSum = vec4(0.0);
         for (int i=-2; i<3; i++) {
           for (int j=-2; j<3; j++) {
