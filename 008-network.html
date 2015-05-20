@@ -1,0 +1,162 @@
+<html>
+  <head>
+    <title>Network</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style type="text/css">
+      html, body, canvas { margin:0; width: 100%; height:100%; overflow: hidden;}
+      xcanvas {width: 49%; vertical-align: top;}
+      video {position: absolute;}
+    </style>
+    <script src="sylvester.js" type="text/javascript"></script>
+    <script src="glUtils.js" type="text/javascript"></script>
+    <script id="shader-fs" type="x-shader/x-fragment">
+      precision mediump float;
+
+      varying vec3 normal;
+
+      void main(void) {
+        gl_FragColor = vec4(gl_FragCoord.st, 0.0, 1.0);
+      }
+    </script>
+    <script id="shader-vs" type="x-shader/x-vertex">
+      precision mediump float;
+
+      attribute vec3 position;
+
+      uniform mat4 uMVMatrix;
+      uniform mat4 uPMatrix;
+
+      void main(void) {
+        gl_Position = uPMatrix * uMVMatrix * vec4(position, 1.0);
+      }
+    </script>
+  </head>
+
+  <body>
+    <canvas id="c">
+      Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
+    </canvas>
+  </body>
+  <script>
+/*
+Texturized Lines:
+For each line (p1,p2), add p1,p2,w,p1,p2,-w,p2,p1,w,p2,p1,-w to buffer.
+This makes 3 attributes per vertex: position, other, width.
+Render a triangle strip.
+In vertex shader, compute the view matrix without perspective and use it to compute eye=vm*(0,0,1).
+gl_Position=position + width * norm(cross(eye, other - position))
+Pass width or abs(width)/width to fragment shader as with across line.
+Possibly create a new attribute to distinguish between p1 and p2 in texture.
+ */
+
+var canvas;
+var gl;
+var lineBuffer;
+var mvMatrix;
+var perspectiveMatrix;
+var shaderProgram;
+var vertexPositionAttribute;
+
+start()
+
+function start() {
+  canvas = document.getElementById("c");
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+
+  gl = canvas.getContext("experimental-webgl");
+
+  if (gl) {
+    gl.clearColor(0.0,0,0, 1.0);  // Clear to black, fully opaque
+    gl.clearDepth(1.0);                 // Clear everything
+    gl.enable(gl.DEPTH_TEST);           // Enable depth testing
+    gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
+
+    gl.enable( gl.BLEND );
+    gl.blendEquation( gl.FUNC_ADD );
+    gl.blendFunc( gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA );
+
+    // init shaders
+    var fragmentShader = getShader(gl, "shader-fs");
+    var vertexShader = getShader(gl, "shader-vs");
+
+    shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+    gl.linkProgram(shaderProgram);
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+      alert("Unable to initialize the shader program.");
+    }
+    gl.useProgram(shaderProgram);
+
+    vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "position");
+    gl.enableVertexAttribArray(vertexPositionAttribute);
+
+    var vertices = [-50, 30, 0, 50, -30, 0];
+
+    lineBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+    // Set up to draw the scene periodically.
+    render();
+  }
+}
+
+function render() {
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  perspectiveMatrix = makePerspective(45, canvas.width/canvas.height, 0.1, 100.0);
+
+  mvMatrix = Matrix.I(4);
+
+  var camera = [0, 0, -40];
+
+  gl.lineWidth(20.0);
+
+  mvMatrix = mvMatrix
+    .x(makeLookAt(camera[0], camera[1], camera[2], 0, 0, 0, 0, 1.0, 0))
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+  gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 0, 0);
+
+  var pUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+  gl.uniformMatrix4fv(pUniform, false, new Float32Array(perspectiveMatrix.flatten()));
+
+  var mvUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+  gl.uniformMatrix4fv(mvUniform, false, new Float32Array(mvMatrix.flatten()));
+
+  gl.drawArrays(gl.LINES, 0, 2);
+
+  requestAnimationFrame(render);
+}
+
+function getShader(gl, id) {
+  var shaderScript = document.getElementById(id);
+  var source = [];
+  var currentChild = shaderScript.firstChild;
+  var shader;
+
+  while(currentChild) {
+    if (currentChild.nodeType == 3)
+      source.push( currentChild.textContent );
+    currentChild = currentChild.nextSibling;
+  }
+
+  if (shaderScript.type == "x-shader/x-fragment") {
+    shader = gl.createShader(gl.FRAGMENT_SHADER);
+  } else if (shaderScript.type == "x-shader/x-vertex") {
+    shader = gl.createShader(gl.VERTEX_SHADER);
+  }
+
+  gl.shaderSource(shader, source.join(''));
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error("An error occurred compiling the shaders: " + gl.getShaderInfoLog(shader));
+    throw new Error("GL Compilation Error");
+  }
+  return shader;
+}
+
+  </script>
+</html>
