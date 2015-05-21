@@ -12,22 +12,31 @@
     <script id="shader-fs" type="x-shader/x-fragment">
       precision mediump float;
 
-      varying vec3 normal;
+      // varying vec2 texCoord;
 
       void main(void) {
-        gl_FragColor = vec4(gl_FragCoord.st, 0.0, 1.0);
+        gl_FragColor = vec4(1.0, 1.0, 0.0, 1.0);
       }
     </script>
     <script id="shader-vs" type="x-shader/x-vertex">
       precision mediump float;
 
       attribute vec3 position;
+      attribute vec3 other;
+      attribute vec2 coord;
 
+      uniform vec3 camera;
       uniform mat4 uMVMatrix;
       uniform mat4 uPMatrix;
+      // uniform float lineWidth;
+
+      // varying vec2 texCoord;
 
       void main(void) {
-        gl_Position = uPMatrix * uMVMatrix * vec4(position, 1.0);
+        vec3 offset = position + 1.0 * coord.x * normalize( cross(position-camera, other-position) );
+        // texCoord = coord;
+        // gl_Position = uPMatrix * vec4(p, 1.0);
+        gl_Position = uPMatrix * uMVMatrix * vec4(offset, 1.0);
       }
     </script>
   </head>
@@ -55,7 +64,8 @@ var lineBuffer;
 var mvMatrix;
 var perspectiveMatrix;
 var shaderProgram;
-var vertexPositionAttribute;
+var positionBuffer, otherBuffer, coordBuffer;
+var lineWidth = 18.0;
 
 start()
 
@@ -84,41 +94,65 @@ function start() {
     gl.attachShader(shaderProgram, vertexShader);
     gl.attachShader(shaderProgram, fragmentShader);
     gl.linkProgram(shaderProgram);
-    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-      alert("Unable to initialize the shader program.");
-    }
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS))
+      throw new Error("Shader program failed to link.");
+
     gl.useProgram(shaderProgram);
 
-    vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "position");
-    gl.enableVertexAttribArray(vertexPositionAttribute);
+    shaderProgram.positionAttribute = gl.getAttribLocation(shaderProgram, "position");
+    gl.enableVertexAttribArray(shaderProgram.positionAttribute);
 
-    var vertices = [-50, 30, 0, 50, -30, 0];
+    shaderProgram.otherAttribute = gl.getAttribLocation(shaderProgram, "other");
+    gl.enableVertexAttribArray(shaderProgram.otherAttribute);
 
-    lineBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+    shaderProgram.coordAttribute = gl.getAttribLocation(shaderProgram, "coord");
+    gl.enableVertexAttribArray(shaderProgram.coordAttribute);
+
+    var p1 = [-10, 10, 0];
+    var p2 = [10, -10, 0];
+
+    positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([].concat(p1,p1,p2,p2)), gl.STATIC_DRAW);
+
+    otherBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, otherBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([].concat(p2,p2,p1,p1)), gl.STATIC_DRAW);
+
+    coordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, coordBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,0,1,0,1,1,-1,1]), gl.STATIC_DRAW);
 
     // Set up to draw the scene periodically.
     render();
   }
 }
 
+var time = 0;
 function render() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  perspectiveMatrix = makePerspective(45, canvas.width/canvas.height, 0.1, 100.0);
+  perspectiveMatrix = makePerspective(45, canvas.width/canvas.height, 0.1, 4000.0);
 
   mvMatrix = Matrix.I(4);
 
-  var camera = [0, 0, -40];
+  var r = 40;
+  var camera = [r*Math.sin(time), 0, -r*Math.cos(time)];
+  time += 0.005;
 
   gl.lineWidth(20.0);
 
   mvMatrix = mvMatrix
     .x(makeLookAt(camera[0], camera[1], camera[2], 0, 0, 0, 0, 1.0, 0))
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
-  gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.vertexAttribPointer(shaderProgram.positionAttribute, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, otherBuffer);
+  gl.vertexAttribPointer(shaderProgram.otherAttribute, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, coordBuffer);
+  gl.vertexAttribPointer(shaderProgram.coordAttribute, 2, gl.FLOAT, false, 0, 0);
 
   var pUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
   gl.uniformMatrix4fv(pUniform, false, new Float32Array(perspectiveMatrix.flatten()));
@@ -126,7 +160,13 @@ function render() {
   var mvUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
   gl.uniformMatrix4fv(mvUniform, false, new Float32Array(mvMatrix.flatten()));
 
-  gl.drawArrays(gl.LINES, 0, 2);
+  var cameraUniform = gl.getUniformLocation(shaderProgram, "camera");
+  gl.uniform3fv(cameraUniform, new Float32Array(camera));
+
+  // var lineWidthUniform = gl.getUniformLocation(shaderProgram, "lineWidth");
+  // gl.uniform1f(lineWidthUniform, lineWidth);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   requestAnimationFrame(render);
 }
