@@ -12,11 +12,15 @@
     <script id="shader-fs" type="x-shader/x-fragment">
       precision mediump float;
 
-      varying vec2 texCoord;
+      uniform float theta;
+
+      varying vec3 texCoord;
 
       void main(void) {
         float alpha = 1.0-.65*abs(atan(50.0*texCoord.x));
-        gl_FragColor = vec4(0.9, .96, 1.0, alpha);
+        float diff = max(0.0, sin(5.0*theta + 628.31*texCoord.z) - .8) * 5.0;
+        alpha *= .05 + .6 * diff;
+        gl_FragColor = vec4(0.9 - .6*diff, .96, 1.0, alpha);
       }
     </script>
     <script id="shader-vs" type="x-shader/x-vertex">
@@ -24,14 +28,14 @@
 
       attribute vec3 position;
       attribute vec3 other;
-      attribute vec2 coord;
+      attribute vec3 coord;
 
       uniform vec3 camera;
       uniform mat4 uMVMatrix;
       uniform mat4 uPMatrix;
       uniform float lineWidth;
 
-      varying vec2 texCoord;
+      varying vec3 texCoord;
 
       void main(void) {
         vec3 offset = position + lineWidth * coord.x * normalize( cross(position-camera, coord.y*(other-position)) );
@@ -65,8 +69,12 @@ var mvMatrix;
 var perspectiveMatrix;
 var shaderProgram;
 var positionBuffer, otherBuffer, coordBuffer;
-var lineWidth = 1.0;
-var N = 100;
+var lineWidth = 0.8;
+var spread = .035;
+var radius = 15;
+var N = 4000;
+var crossings = 100;
+var dt = .001;
 
 var v = {
   norm : function(v) { return Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]); },
@@ -138,9 +146,17 @@ function start() {
     gl.enableVertexAttribArray(shaderProgram.coordAttribute);
 
 
-    var positions=[], others=[], coords=[];
+    var points=[], positions=[], others=[], coords=[];
+    var p = [radius, 0, 0];
     for (var i=0; i<N; i++)
-      pushLine(positions,others,coords);
+      points.push(p = randPoint(p, spread));
+
+    var endpoints = N + crossings + 2;
+    for (var i=0; i<N; i++)
+      pushLine(points[i], points[(i+1)%N], i/endpoints, (i+1)/endpoints, positions,others,coords);
+
+    for (var i=0; i<crossings; i++)
+      pushLine(points[randInt(N)], points[randInt(N)], (N+i+1)/endpoints, (N+i+2)/endpoints, positions,others,coords);
 
     positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -159,10 +175,9 @@ function start() {
   }
 }
 
-function pushLine(positions, others, coords) {
-  var p1 = randPoint(10);
-  var p2 = randPoint(10);
+function randInt(n) { return Math.floor(n*Math.random()); }
 
+function pushLine(p1, p2, tc1, tc2, positions, others, coords) {
   positions.push.apply(positions, p1);
   positions.push.apply(positions, p1);
   positions.push.apply(positions, p2);
@@ -177,11 +192,11 @@ function pushLine(positions, others, coords) {
   others.push.apply(others, p1);
   others.push.apply(others, p2);
 
-  coords.push(1,1,-1,1,1,-1,-1,-1,1,-1,-1,1);
+  coords.push(1,1,tc1,-1,1,tc1,1,-1,tc2,-1,-1,tc2,1,-1,tc2,-1,1,tc1);
 }
 
-function randPoint(r) {
-  return q.rotate([r,0,0], q.safe_rotation(Math.random()*2*Math.PI, [0, negRand(), negRand()]));
+function randPoint(p, d) {
+  return q.rotate(p, q.safe_rotation(d*Math.random()*2*Math.PI, [0, negRand(), negRand()]));
 }
 
 function negRand() { return Math.random() * 2 - 1; }
@@ -194,9 +209,9 @@ function render() {
 
   mvMatrix = Matrix.I(4);
 
-  var r = 40;
+  var r = 30;
   var camera = [r*Math.sin(time), 0, -r*Math.cos(time)];
-  time += 0.005;
+  time += dt;
 
   gl.lineWidth(20.0);
 
@@ -210,7 +225,7 @@ function render() {
   gl.vertexAttribPointer(shaderProgram.otherAttribute, 3, gl.FLOAT, false, 0, 0);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, coordBuffer);
-  gl.vertexAttribPointer(shaderProgram.coordAttribute, 2, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribPointer(shaderProgram.coordAttribute, 3, gl.FLOAT, false, 0, 0);
 
   var pUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
   gl.uniformMatrix4fv(pUniform, false, new Float32Array(perspectiveMatrix.flatten()));
@@ -224,7 +239,10 @@ function render() {
   var lineWidthUniform = gl.getUniformLocation(shaderProgram, "lineWidth");
   gl.uniform1f(lineWidthUniform, lineWidth);
 
-  gl.drawArrays(gl.TRIANGLES, 0, 6*N);
+  var thetaUniform = gl.getUniformLocation(shaderProgram, "theta");
+  gl.uniform1f(thetaUniform, time);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6*(N+crossings));
 
   requestAnimationFrame(render);
 }
