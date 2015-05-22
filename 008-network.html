@@ -12,10 +12,11 @@
     <script id="shader-fs" type="x-shader/x-fragment">
       precision mediump float;
 
-      // varying vec2 texCoord;
+      varying vec2 texCoord;
 
       void main(void) {
-        gl_FragColor = vec4(1.0, 1.0, 0.0, 1.0);
+        float alpha = 1.0-.65*abs(atan(50.0*texCoord.x));
+        gl_FragColor = vec4(0.9, .96, 1.0, alpha);
       }
     </script>
     <script id="shader-vs" type="x-shader/x-vertex">
@@ -28,14 +29,13 @@
       uniform vec3 camera;
       uniform mat4 uMVMatrix;
       uniform mat4 uPMatrix;
-      // uniform float lineWidth;
+      uniform float lineWidth;
 
-      // varying vec2 texCoord;
+      varying vec2 texCoord;
 
       void main(void) {
-        vec3 offset = position + 1.0 * coord.x * normalize( cross(position-camera, other-position) );
-        // texCoord = coord;
-        // gl_Position = uPMatrix * vec4(p, 1.0);
+        vec3 offset = position + lineWidth * coord.x * normalize( cross(position-camera, coord.y*(other-position)) );
+        texCoord = coord;
         gl_Position = uPMatrix * uMVMatrix * vec4(offset, 1.0);
       }
     </script>
@@ -65,7 +65,36 @@ var mvMatrix;
 var perspectiveMatrix;
 var shaderProgram;
 var positionBuffer, otherBuffer, coordBuffer;
-var lineWidth = 18.0;
+var lineWidth = 1.0;
+var N = 100;
+
+var v = {
+  norm : function(v) { return Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]); },
+  add : function(v0,v1) { return [v0[0]+v1[0],v0[1]+v1[1],v0[2]+v1[2]]; },
+  sub : function(v0,v1) { return [v0[0]-v1[0],v0[1]-v1[1],v0[2]-v1[2]]; },
+  dot : function(v0,v1) { return v0[0]*v1[0] + v0[1]*v1[1] + v0[2]*v1[2]; },
+  scale : function(v,s) { return [v[0]*s,v[1]*s,v[2]*s]; },
+  cross : function(v1,v2) { return [
+          v1[1]*v2[2] - v1[2]*v2[1],
+          v1[2]*v2[0] - v1[0]*v2[2],
+          v1[0]*v2[1] - v1[1]*v2[0] ]; },
+  unit : function(v) { return this.scale(v,1/this.norm(v)); }
+}
+
+var q = {
+  quaternion : function(vec) { return [0].concat(vec); },
+  rotation : function( a, vec ) { var a2=a/2, sina2=Math.sin(a2);
+             return [Math.cos(a2), vec[0]*sina2, vec[1]*sina2, vec[2]*sina2 ]; },
+  safe_rotation : function( a, vec ) { return q.rotation(a,v.unit( vec )); },
+  rotate : function( vec, rot ) { return q.mul(q.mul(rot,q.quaternion(vec)),q.conjugate(rot)).slice(1); },
+  norm : function(q) { var w=q[0],x=q[1],y=q[2],z=q[3]; return Math.sqrt(w*w+x*x+y*y+z*z); },
+  conjugate : function(q) { return [q[0],-q[1],-q[2],-q[3]] },
+  mul : function(q1,q2) { return [
+        q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3],
+        q1[0]*q2[1] + q1[1]*q2[0] - q1[2]*q2[3] + q1[3]*q2[2],
+        q1[0]*q2[2] + q1[1]*q2[3] + q1[2]*q2[0] - q1[3]*q2[1],
+        q1[0]*q2[3] - q1[1]*q2[2] + q1[2]*q2[1] + q1[3]*q2[0] ]; },
+}
 
 start()
 
@@ -79,7 +108,7 @@ function start() {
   if (gl) {
     gl.clearColor(0.0,0,0, 1.0);  // Clear to black, fully opaque
     gl.clearDepth(1.0);                 // Clear everything
-    gl.enable(gl.DEPTH_TEST);           // Enable depth testing
+    gl.disable(gl.DEPTH_TEST);           // Enable depth testing
     gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
 
     gl.enable( gl.BLEND );
@@ -108,25 +137,54 @@ function start() {
     shaderProgram.coordAttribute = gl.getAttribLocation(shaderProgram, "coord");
     gl.enableVertexAttribArray(shaderProgram.coordAttribute);
 
-    var p1 = [-10, 10, 0];
-    var p2 = [10, -10, 0];
+
+    var positions=[], others=[], coords=[];
+    for (var i=0; i<N; i++)
+      pushLine(positions,others,coords);
 
     positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([].concat(p1,p1,p2,p2)), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
 
     otherBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, otherBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([].concat(p2,p2,p1,p1)), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(others), gl.STATIC_DRAW);
 
     coordBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, coordBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,0,1,0,1,1,-1,1]), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coords), gl.STATIC_DRAW);
 
     // Set up to draw the scene periodically.
     render();
   }
 }
+
+function pushLine(positions, others, coords) {
+  var p1 = randPoint(10);
+  var p2 = randPoint(10);
+
+  positions.push.apply(positions, p1);
+  positions.push.apply(positions, p1);
+  positions.push.apply(positions, p2);
+  positions.push.apply(positions, p2);
+  positions.push.apply(positions, p2);
+  positions.push.apply(positions, p1);
+
+  others.push.apply(others, p2);
+  others.push.apply(others, p2);
+  others.push.apply(others, p1);
+  others.push.apply(others, p1);
+  others.push.apply(others, p1);
+  others.push.apply(others, p2);
+
+  coords.push(1,1,-1,1,1,-1,-1,-1,1,-1,-1,1);
+}
+
+function randPoint(r) {
+  return q.rotate([r,0,0], q.safe_rotation(Math.random()*2*Math.PI, [0, negRand(), negRand()]));
+}
+
+function negRand() { return Math.random() * 2 - 1; }
 
 var time = 0;
 function render() {
@@ -163,10 +221,10 @@ function render() {
   var cameraUniform = gl.getUniformLocation(shaderProgram, "camera");
   gl.uniform3fv(cameraUniform, new Float32Array(camera));
 
-  // var lineWidthUniform = gl.getUniformLocation(shaderProgram, "lineWidth");
-  // gl.uniform1f(lineWidthUniform, lineWidth);
+  var lineWidthUniform = gl.getUniformLocation(shaderProgram, "lineWidth");
+  gl.uniform1f(lineWidthUniform, lineWidth);
 
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.drawArrays(gl.TRIANGLES, 0, 6*N);
 
   requestAnimationFrame(render);
 }
