@@ -201,7 +201,7 @@ function pushLine(p1, p2, tc1, tc2, positions, others, coords) {
 }
 
 function randPoint(p, d) {
-  return q.rotate(p, q.safe_rotation(d*Math.random()*2*Math.PI, [0, negRand(), negRand()]));
+  return q.rotate(p, q.safe_rotation(d*Math.random()*2*Math.PI, [0, negRand(), .2*negRand()]));
 }
 
 function negRand() { return Math.random() * 2 - 1; }
