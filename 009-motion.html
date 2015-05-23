@@ -15,8 +15,8 @@
 
       uniform sampler2D video;
 
-      #define SMOOTH 64.0
-      #define PIXELS 64.0
+      #define SMOOTH 16.0
+      #define PIXELS 128.0
 
       void main(void) {
         vec2 p = (gl_FragCoord.st / PIXELS) * vec2(-1.0,1.0) + vec2(1.0,0.0);
@@ -35,11 +35,11 @@
       uniform sampler2D previous;
       uniform sampler2D current;
 
-      #define PIXELS 64.0
+      #define PIXELS 128.0
 
       void main(void) {
         vec2 p = gl_FragCoord.st / PIXELS;
-        gl_FragColor = vec4( abs(texture2D(current,p) - texture2D(previous,p)).rgb, 1.0);
+        gl_FragColor = vec4( vec3(0.0, .6, 0.9) + vec3(3.0,1.0,0.6)*abs(texture2D(current,p) - texture2D(previous,p)).rgb, 1.0);
       }
     </script>
 
@@ -52,9 +52,15 @@
       uniform float width;
       uniform float height;
 
+      #define PIXELS 128.0
+
       void main(void) {
-        vec4 c = texture2D(video, gl_FragCoord.st*vec2(1.0,-1.333) / width + vec2(0,1.0));
-        gl_FragColor = c.rgba;
+        vec2 position = gl_FragCoord.st*vec2(1.0,-1.333) / width + vec2(0,1.0);
+        vec2 pointCoord = ((floor(position * PIXELS) + .5) / PIXELS - position) * vec2(1.0,.75);
+        vec4 c = texture2D(video, position);
+        if (length(pointCoord) > .3/PIXELS)
+          c = vec4(0.0, .6, 0.9, 1.0);
+        gl_FragColor = c;
       }
     </script>
 
@@ -90,7 +96,7 @@ var diffBuffer;
 var pixelateShader;
 var diffShader;
 var onscreenShader;
-var PIXELS = 64;
+var PIXELS = 128;
 
 
 navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
