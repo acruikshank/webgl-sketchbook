@@ -1,0 +1,268 @@
+<html>
+  <head>
+    <title>Motion</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style type="text/css">
+      html, body, canvas { margin:0; width: 100%; height:100%; overflow: hidden;}
+      xcanvas {width: 49%; vertical-align: top;}
+      video {position: absolute;}
+    </style>
+    <script src="sylvester.js" type="text/javascript"></script>
+    <script src="glUtils.js" type="text/javascript"></script>
+
+    <script id="integrate" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D video;
+      uniform sampler2D previous;
+
+      uniform float alpha;
+      uniform vec2 drift;
+
+      #define SMOOTH 16.0
+      #define PIXELS 16.0
+
+      void main(void) {
+        vec2 p = gl_FragCoord.st / PIXELS;
+        float d = 1.0/(PIXELS*SMOOTH);
+        vec4 color = vec4(0.0);
+        for (float i=0.0; i<SMOOTH; i++)
+          for (float j=0.0; j<SMOOTH; j++)
+            color += texture2D(video,p+vec2(i*d,j*d));
+        gl_FragColor = vec4( color.rgb / (SMOOTH*SMOOTH), 1.0);
+      }
+    </script>
+
+    <!-- Fragment shader program -->
+
+    <script id="shader-fs" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D video;
+      uniform float width;
+      uniform float height;
+
+      void main(void) {
+        vec4 c = texture2D(video, gl_FragCoord.st*vec2(1.0,-1.333) / width + vec2(0,1.0));
+        gl_FragColor = c.rgba;
+      }
+    </script>
+
+    <!-- Vertex shader program -->
+
+    <script id="shader-vs" type="x-shader/x-vertex">
+      precision mediump float;
+
+      attribute vec2 position;
+
+      uniform sampler2D video;
+
+      void main(void) {
+        gl_Position = vec4(position, 0.0, 1.0);
+      }
+    </script>
+  </head>
+
+  <body>
+    <canvas id="glcanvas">
+      Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
+    </canvas>
+    <video id="v" autoplay width="640" height="480"></video>
+  </body>
+  <script>
+var canvas;
+var gl;
+var triangleBuffer;
+var coordAttribute;
+var offscreenBuffers = [];
+var offscreenBufferIndex = 0;
+var offscreenShader;
+var onscreenShader;
+var ALPHA = 0.04;
+
+navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
+                        || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+navigator.getUserMedia({audio:false,video:true}, function(stream) {
+  var video=document.getElementById("v");
+  video.src=URL.createObjectURL(stream);
+  video.addEventListener('canplay', start);
+}, function(err) { console.log(err); });
+
+function start() {
+  canvas = document.getElementById("glcanvas");
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+
+  gl = canvas.getContext("experimental-webgl");
+
+  if (gl) {
+
+    gl.clearColor(0.0,.02,.1, 1.0);  // Clear to black, fully opaque
+    gl.clearDepth(1.0);                 // Clear everything
+    gl.enable(gl.DEPTH_TEST);           // Enable depth testing
+    gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
+
+    offscreenShader = createProgram(gl, 'shader-vs', 'integrate');
+
+    onscreenShader = createProgram(gl, 'shader-vs', 'shader-fs');
+    gl.useProgram(onscreenShader);
+
+    coordAttribute = gl.getAttribLocation(onscreenShader, "position");
+    gl.enableVertexAttribArray(coordAttribute);
+
+    var vertices = new Float32Array([-1,-1,-1,4,4,-1]);
+
+    triangleBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    offscreenBuffers = [initTextureFramebuffer(gl), initTextureFramebuffer(gl)];
+
+    // Set up to draw the scene periodically.
+    render();
+  }
+}
+
+var time = 0;
+var jitter = .05;
+var jitterAmount = .1;
+var jitterAlpha = .005;
+function integrateVideo() {
+  var previous = offscreenBuffers[offscreenBufferIndex];
+  offscreenBufferIndex = offscreenBufferIndex ? 0 : 1;
+  var offscreenBuffer = offscreenBuffers[offscreenBufferIndex];
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, offscreenBuffer.framebuffer);
+
+  gl.viewport(0, 0, offscreenBuffer.framebuffer.width, offscreenBuffer.framebuffer.height);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  var texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, document.getElementById('v'));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  gl.useProgram(offscreenShader);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.uniform1i(gl.getUniformLocation(offscreenShader, "video"), 0);
+
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, previous.texture);
+  gl.uniform1i(gl.getUniformLocation(offscreenShader, "previous"), 1);
+
+  gl.uniform1f( gl.getUniformLocation(offscreenShader, "alpha"), ALPHA);
+
+  if (Math.random() < jitterAlpha) {
+    jitterAmount = Math.random();
+    jitterAmount *= jitterAmount;
+  }
+  time = 2* Math.PI*Math.random();
+  gl.uniform2f( gl.getUniformLocation(offscreenShader, "drift"),
+    jitterAmount * jitter * Math.sin(time),
+    jitterAmount * jitter * Math.cos(time)
+  );
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+  gl.vertexAttribPointer(coordAttribute, 2, gl.FLOAT, false, 0, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function render() {
+  integrateVideo();
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  gl.useProgram(onscreenShader);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, offscreenBuffers[offscreenBufferIndex].texture);
+  gl.uniform1i(gl.getUniformLocation(onscreenShader, "video"), 0);
+
+  gl.uniform1f( gl.getUniformLocation(onscreenShader, "width"), canvas.width);
+  gl.uniform1f( gl.getUniformLocation(onscreenShader, "height"), canvas.height);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+  gl.vertexAttribPointer(coordAttribute, 2, gl.FLOAT, false, 0, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  requestAnimationFrame(render);
+}
+
+
+function initTextureFramebuffer(gl) {
+    var rttFramebuffer = gl.createFramebuffer();
+    rttFramebuffer.width = 16;
+    rttFramebuffer.height = 16;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rttFramebuffer);
+
+    var rttTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, rttTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, rttFramebuffer.width, rttFramebuffer.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rttTexture, 0);
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    return {framebuffer:rttFramebuffer, texture:rttTexture};
+}
+
+function createProgram(gl, vertex, fragment) {
+  // init shaders
+  var fragmentShader = getShader(gl, fragment);
+  var vertexShader = getShader(gl, vertex);
+
+
+  var shaderProgram = gl.createProgram();
+  gl.attachShader(shaderProgram, vertexShader);
+  gl.attachShader(shaderProgram, fragmentShader);
+  gl.linkProgram(shaderProgram);
+  if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+    throw new Error("Unable to initialize the shader program.");
+  }
+  return shaderProgram;
+}
+
+function getShader(gl, id) {
+  var shaderScript = document.getElementById(id);
+  var source = [];
+  var currentChild = shaderScript.firstChild;
+  var shader;
+
+  while(currentChild) {
+    if (currentChild.nodeType == 3)
+      source.push( currentChild.textContent );
+    currentChild = currentChild.nextSibling;
+  }
+
+  if (shaderScript.type == "x-shader/x-fragment") {
+    shader = gl.createShader(gl.FRAGMENT_SHADER);
+  } else if (shaderScript.type == "x-shader/x-vertex") {
+    shader = gl.createShader(gl.VERTEX_SHADER);
+  }
+
+  gl.shaderSource(shader, source.join(''));
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error("An error occurred compiling the shaders: " + gl.getShaderInfoLog(shader));
+    throw new Error("GL Compilation Error");
+  }
+  return shader;
+}
+  </script>
+</html>
