@@ -10,26 +10,36 @@
     <script src="sylvester.js" type="text/javascript"></script>
     <script src="glUtils.js" type="text/javascript"></script>
 
-    <script id="integrate" type="x-shader/x-fragment">
+    <script id="pixelate" type="x-shader/x-fragment">
       precision mediump float;
 
       uniform sampler2D video;
-      uniform sampler2D previous;
 
-      uniform float alpha;
-      uniform vec2 drift;
-
-      #define SMOOTH 16.0
-      #define PIXELS 16.0
+      #define SMOOTH 64.0
+      #define PIXELS 64.0
 
       void main(void) {
-        vec2 p = gl_FragCoord.st / PIXELS;
+        vec2 p = (gl_FragCoord.st / PIXELS) * vec2(-1.0,1.0) + vec2(1.0,0.0);
         float d = 1.0/(PIXELS*SMOOTH);
         vec4 color = vec4(0.0);
         for (float i=0.0; i<SMOOTH; i++)
           for (float j=0.0; j<SMOOTH; j++)
-            color += texture2D(video,p+vec2(i*d,j*d));
+            color += texture2D(video,p+vec2(-i*d,j*d));
         gl_FragColor = vec4( color.rgb / (SMOOTH*SMOOTH), 1.0);
+      }
+    </script>
+
+    <script id="diff" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D previous;
+      uniform sampler2D current;
+
+      #define PIXELS 64.0
+
+      void main(void) {
+        vec2 p = gl_FragCoord.st / PIXELS;
+        gl_FragColor = vec4( abs(texture2D(current,p) - texture2D(previous,p)).rgb, 1.0);
       }
     </script>
 
@@ -74,11 +84,14 @@ var canvas;
 var gl;
 var triangleBuffer;
 var coordAttribute;
-var offscreenBuffers = [];
-var offscreenBufferIndex = 0;
-var offscreenShader;
+var videoBuffers = [];
+var videoBufferIndex = 0;
+var diffBuffer;
+var pixelateShader;
+var diffShader;
 var onscreenShader;
-var ALPHA = 0.04;
+var PIXELS = 64;
+
 
 navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
                         || navigator.mozGetUserMedia || navigator.msGetUserMedia;
@@ -102,7 +115,8 @@ function start() {
     gl.enable(gl.DEPTH_TEST);           // Enable depth testing
     gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
 
-    offscreenShader = createProgram(gl, 'shader-vs', 'integrate');
+    pixelateShader = createProgram(gl, 'shader-vs', 'pixelate');
+    diffShader = createProgram(gl, 'shader-vs', 'diff');
 
     onscreenShader = createProgram(gl, 'shader-vs', 'shader-fs');
     gl.useProgram(onscreenShader);
@@ -116,25 +130,22 @@ function start() {
     gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
-    offscreenBuffers = [initTextureFramebuffer(gl), initTextureFramebuffer(gl)];
+    videoBuffers = [initTextureFramebuffer(gl,PIXELS), initTextureFramebuffer(gl,PIXELS)];
+    diffBuffer = initTextureFramebuffer(gl,PIXELS);
 
     // Set up to draw the scene periodically.
     render();
   }
 }
 
-var time = 0;
-var jitter = .05;
-var jitterAmount = .1;
-var jitterAlpha = .005;
-function integrateVideo() {
-  var previous = offscreenBuffers[offscreenBufferIndex];
-  offscreenBufferIndex = offscreenBufferIndex ? 0 : 1;
-  var offscreenBuffer = offscreenBuffers[offscreenBufferIndex];
+function pixelateVideo() {
+  var previous = videoBuffers[videoBufferIndex];
+  videoBufferIndex = videoBufferIndex ? 0 : 1;
+  var videoBuffer = videoBuffers[videoBufferIndex];
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, offscreenBuffer.framebuffer);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, videoBuffer.framebuffer);
 
-  gl.viewport(0, 0, offscreenBuffer.framebuffer.width, offscreenBuffer.framebuffer.height);
+  gl.viewport(0, 0, videoBuffer.framebuffer.width, videoBuffer.framebuffer.height);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   var texture = gl.createTexture();
@@ -145,27 +156,38 @@ function integrateVideo() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.bindTexture(gl.TEXTURE_2D, null);
 
-  gl.useProgram(offscreenShader);
+  gl.useProgram(pixelateShader);
 
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.uniform1i(gl.getUniformLocation(offscreenShader, "video"), 0);
+  gl.uniform1i(gl.getUniformLocation(pixelateShader, "video"), 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+  gl.vertexAttribPointer(coordAttribute, 2, gl.FLOAT, false, 0, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function diffVideo() {
+  var previous = videoBuffers[videoBufferIndex];
+  var current = videoBuffers[(videoBufferIndex + 1) % 2];
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, diffBuffer.framebuffer);
+
+  gl.viewport(0, 0, diffBuffer.framebuffer.width, diffBuffer.framebuffer.height);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  gl.useProgram(diffShader);
 
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, previous.texture);
-  gl.uniform1i(gl.getUniformLocation(offscreenShader, "previous"), 1);
+  gl.uniform1i(gl.getUniformLocation(diffShader, "previous"), 1);
 
-  gl.uniform1f( gl.getUniformLocation(offscreenShader, "alpha"), ALPHA);
-
-  if (Math.random() < jitterAlpha) {
-    jitterAmount = Math.random();
-    jitterAmount *= jitterAmount;
-  }
-  time = 2* Math.PI*Math.random();
-  gl.uniform2f( gl.getUniformLocation(offscreenShader, "drift"),
-    jitterAmount * jitter * Math.sin(time),
-    jitterAmount * jitter * Math.cos(time)
-  );
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, current.texture);
+  gl.uniform1i(gl.getUniformLocation(diffShader, "current"), 2);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
   gl.vertexAttribPointer(coordAttribute, 2, gl.FLOAT, false, 0, 0);
@@ -176,7 +198,8 @@ function integrateVideo() {
 }
 
 function render() {
-  integrateVideo();
+  pixelateVideo();
+  diffVideo();
 
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -184,7 +207,7 @@ function render() {
   gl.useProgram(onscreenShader);
 
   gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, offscreenBuffers[offscreenBufferIndex].texture);
+  gl.bindTexture(gl.TEXTURE_2D, diffBuffer.texture);
   gl.uniform1i(gl.getUniformLocation(onscreenShader, "video"), 0);
 
   gl.uniform1f( gl.getUniformLocation(onscreenShader, "width"), canvas.width);
@@ -199,10 +222,10 @@ function render() {
 }
 
 
-function initTextureFramebuffer(gl) {
+function initTextureFramebuffer(gl, size) {
     var rttFramebuffer = gl.createFramebuffer();
-    rttFramebuffer.width = 16;
-    rttFramebuffer.height = 16;
+    rttFramebuffer.width = size;
+    rttFramebuffer.height = size;
     gl.bindFramebuffer(gl.FRAMEBUFFER, rttFramebuffer);
 
     var rttTexture = gl.createTexture();
