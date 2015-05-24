@@ -1,0 +1,371 @@
+<html>
+  <head>
+    <title>Dances</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style type="text/css">
+      html, body, canvas { margin:0; width: 100%; height:100%; overflow: hidden;}
+      xcanvas {width: 49%; vertical-align: top;}
+      video {position: absolute;}
+    </style>
+    <script src="sylvester.js" type="text/javascript"></script>
+    <script src="glUtils.js" type="text/javascript"></script>
+
+    <script id="pixelate" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D video;
+      uniform float pixels;
+
+      #define SMOOTH 16.0
+
+      void main(void) {
+        vec2 p = (gl_FragCoord.st / pixels) * vec2(-1.0,1.0) + vec2(1.0,0.0);
+        float d = 1.0/(pixels*SMOOTH);
+        vec4 color = vec4(0.0);
+        for (float i=0.0; i<SMOOTH; i++)
+          for (float j=0.0; j<SMOOTH; j++)
+            color += texture2D(video,p+vec2(-i*d,j*d));
+        gl_FragColor = vec4( color.rgb / (SMOOTH*SMOOTH), 1.0);
+      }
+    </script>
+
+    <script id="diff" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D previous;
+      uniform sampler2D current;
+      uniform float pixels;
+
+      void main(void) {
+        vec2 p = gl_FragCoord.st / pixels;
+        gl_FragColor = vec4( abs(texture2D(current,p) - texture2D(previous,p)).rgb, 1.0);
+      }
+    </script>
+
+    <script id="field" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D previous;
+      uniform sampler2D diff;
+      uniform float pixels;
+
+      #define C 0.8
+
+      void main(void) {
+        vec2 p = gl_FragCoord.st / pixels;
+        float d = 1.0 / pixels;
+
+        vec4 c = vec4(0.0);
+        c += (texture2D(diff, p + vec2(-4.0*d,-4.0*d)) + texture2D(diff, p + vec2(-4.0*d,4.0*d))) / 32.0;
+        c += (texture2D(diff, p + vec2(-3.0*d,-4.0*d)) + texture2D(diff, p + vec2(-3.0*d,4.0*d))) / 25.0;
+        c += (texture2D(diff, p + vec2(-2.0*d,-4.0*d)) + texture2D(diff, p + vec2(-2.0*d,4.0*d))) / 20.0;
+        c += (texture2D(diff, p + vec2(-1.0*d,-4.0*d)) + texture2D(diff, p + vec2(-1.0*d,4.0*d))) / 17.0;
+        c += (texture2D(diff, p + vec2( 0.0*d,-4.0*d)) + texture2D(diff, p + vec2( 0.0*d,4.0*d))) / 16.0;
+        c += (texture2D(diff, p + vec2( 1.0*d,-4.0*d)) + texture2D(diff, p + vec2( 1.0*d,4.0*d))) / 17.0;
+        c += (texture2D(diff, p + vec2( 2.0*d,-4.0*d)) + texture2D(diff, p + vec2( 2.0*d,4.0*d))) / 20.0;
+        c += (texture2D(diff, p + vec2( 3.0*d,-4.0*d)) + texture2D(diff, p + vec2( 3.0*d,4.0*d))) / 25.0;
+        c += (texture2D(diff, p + vec2( 4.0*d,-4.0*d)) + texture2D(diff, p + vec2( 4.0*d,4.0*d))) / 32.0;
+
+        c += (texture2D(diff, p + vec2(-4.0*d,-3.0*d)) + texture2D(diff, p + vec2(-4.0*d,3.0*d))) / 25.0;
+        c += (texture2D(diff, p + vec2(-3.0*d,-3.0*d)) + texture2D(diff, p + vec2(-3.0*d,3.0*d))) / 18.0;
+        c += (texture2D(diff, p + vec2(-2.0*d,-3.0*d)) + texture2D(diff, p + vec2(-2.0*d,3.0*d))) / 13.0;
+        c += (texture2D(diff, p + vec2(-1.0*d,-3.0*d)) + texture2D(diff, p + vec2(-1.0*d,3.0*d))) / 10.0;
+        c += (texture2D(diff, p + vec2( 0.0*d,-3.0*d)) + texture2D(diff, p + vec2( 0.0*d,3.0*d))) /  9.0;
+        c += (texture2D(diff, p + vec2( 1.0*d,-3.0*d)) + texture2D(diff, p + vec2( 1.0*d,3.0*d))) / 10.0;
+        c += (texture2D(diff, p + vec2( 2.0*d,-3.0*d)) + texture2D(diff, p + vec2( 2.0*d,3.0*d))) / 13.0;
+        c += (texture2D(diff, p + vec2( 3.0*d,-3.0*d)) + texture2D(diff, p + vec2( 3.0*d,3.0*d))) / 18.0;
+        c += (texture2D(diff, p + vec2( 4.0*d,-3.0*d)) + texture2D(diff, p + vec2( 4.0*d,3.0*d))) / 25.0;
+
+        c += (texture2D(diff, p + vec2(-4.0*d,-2.0*d)) + texture2D(diff, p + vec2(-4.0*d,2.0*d))) / 20.0;
+        c += (texture2D(diff, p + vec2(-3.0*d,-2.0*d)) + texture2D(diff, p + vec2(-3.0*d,2.0*d))) / 13.0;
+        c += (texture2D(diff, p + vec2(-2.0*d,-2.0*d)) + texture2D(diff, p + vec2(-2.0*d,2.0*d))) /  8.0;
+        c += (texture2D(diff, p + vec2(-1.0*d,-2.0*d)) + texture2D(diff, p + vec2(-1.0*d,2.0*d))) /  5.0;
+        c += (texture2D(diff, p + vec2( 0.0*d,-2.0*d)) + texture2D(diff, p + vec2( 0.0*d,2.0*d))) /  4.0;
+        c += (texture2D(diff, p + vec2( 1.0*d,-2.0*d)) + texture2D(diff, p + vec2( 1.0*d,2.0*d))) /  5.0;
+        c += (texture2D(diff, p + vec2( 2.0*d,-2.0*d)) + texture2D(diff, p + vec2( 2.0*d,2.0*d))) /  8.0;
+        c += (texture2D(diff, p + vec2( 3.0*d,-2.0*d)) + texture2D(diff, p + vec2( 3.0*d,2.0*d))) / 13.0;
+        c += (texture2D(diff, p + vec2( 4.0*d,-2.0*d)) + texture2D(diff, p + vec2( 4.0*d,2.0*d))) / 20.0;
+
+        c += (texture2D(diff, p + vec2(-4.0*d,-1.0*d)) + texture2D(diff, p + vec2(-4.0*d,1.0*d))) / 17.0;
+        c += (texture2D(diff, p + vec2(-3.0*d,-1.0*d)) + texture2D(diff, p + vec2(-3.0*d,1.0*d))) / 10.0;
+        c += (texture2D(diff, p + vec2(-2.0*d,-1.0*d)) + texture2D(diff, p + vec2(-2.0*d,1.0*d))) /  5.0;
+        c += (texture2D(diff, p + vec2(-1.0*d,-1.0*d)) + texture2D(diff, p + vec2(-1.0*d,1.0*d))) /  2.0;
+        c += (texture2D(diff, p + vec2( 0.0*d,-1.0*d)) + texture2D(diff, p + vec2( 0.0*d,1.0*d))) /  1.0;
+        c += (texture2D(diff, p + vec2( 1.0*d,-1.0*d)) + texture2D(diff, p + vec2( 1.0*d,1.0*d))) /  2.0;
+        c += (texture2D(diff, p + vec2( 2.0*d,-1.0*d)) + texture2D(diff, p + vec2( 2.0*d,1.0*d))) /  5.0;
+        c += (texture2D(diff, p + vec2( 3.0*d,-1.0*d)) + texture2D(diff, p + vec2( 3.0*d,1.0*d))) / 10.0;
+        c += (texture2D(diff, p + vec2( 4.0*d,-1.0*d)) + texture2D(diff, p + vec2( 4.0*d,1.0*d))) / 17.0;
+
+        c +=  texture2D(diff, p + vec2(-4.0*d,0.0*d)) / 16.0;
+        c +=  texture2D(diff, p + vec2(-3.0*d,0.0*d)) /  9.0;
+        c +=  texture2D(diff, p + vec2(-2.0*d,0.0*d)) /  4.0;
+        c +=  texture2D(diff, p + vec2(-1.0*d,0.0*d)) /  1.0;
+
+        c +=  texture2D(diff, p + vec2( 1.0*d,0.0*d)) /  1.0;
+        c +=  texture2D(diff, p + vec2( 2.0*d,0.0*d)) /  4.0;
+        c +=  texture2D(diff, p + vec2( 3.0*d,0.0*d)) /  9.0;
+        c +=  texture2D(diff, p + vec2( 4.0*d,0.0*d)) / 16.0;
+
+        gl_FragColor = vec4( mix(texture2D(previous,p), C*c,.3).rgb, 1.0);
+      }
+    </script>
+
+    <script id="shader-fs" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D video;
+      uniform float width;
+      uniform float height;
+
+      #define PIXELS 128.0
+
+      void main(void) {
+        vec2 position = gl_FragCoord.st*vec2(1.0,-1.333) / width + vec2(0,1.0);
+        gl_FragColor = texture2D(video, position);
+      }
+    </script>
+
+    <!-- Vertex shader program -->
+
+    <script id="shader-vs" type="x-shader/x-vertex">
+      precision mediump float;
+
+      attribute vec2 position;
+
+      uniform sampler2D video;
+
+      void main(void) {
+        gl_Position = vec4(position, 0.0, 1.0);
+      }
+    </script>
+  </head>
+
+  <body>
+    <canvas id="glcanvas">
+      Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
+    </canvas>
+    <video id="v" autoplay width="640" height="480"></video>
+  </body>
+  <script>
+var canvas;
+var gl;
+var triangleBuffer;
+var coordAttribute;
+var pixelateBuffer;
+var pixelateShader;
+var diffBuffer;
+var diffShader;
+var fieldBuffers;
+var fieldShader;
+var onscreenShader;
+var PIXELS = 128;
+
+
+navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
+                        || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+navigator.getUserMedia({audio:false,video:true}, function(stream) {
+  var video=document.getElementById("v");
+  video.src=URL.createObjectURL(stream);
+  video.addEventListener('canplay', start);
+}, function(err) { console.log(err); });
+
+function start() {
+  canvas = document.getElementById("glcanvas");
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+
+  gl = canvas.getContext("experimental-webgl");
+
+  if (gl) {
+
+    gl.clearColor(0.0,.02,.1, 1.0);  // Clear to black, fully opaque
+    gl.clearDepth(1.0);                 // Clear everything
+    gl.enable(gl.DEPTH_TEST);           // Enable depth testing
+    gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
+
+    pixelateShader = createProgram(gl, 'shader-vs', 'pixelate');
+    diffShader = createProgram(gl, 'shader-vs', 'diff');
+    fieldShader = createProgram(gl, 'shader-vs', 'field');
+
+    onscreenShader = createProgram(gl, 'shader-vs', 'shader-fs');
+    gl.useProgram(onscreenShader);
+
+    coordAttribute = gl.getAttribLocation(onscreenShader, "position");
+    gl.enableVertexAttribArray(coordAttribute);
+
+    var vertices = new Float32Array([-1,-1,-1,4,4,-1]);
+
+    triangleBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    pixelateBuffers = ReBuffer(gl, 2, PIXELS);
+    diffBuffer = ReBuffer(gl, 1, PIXELS);
+    fieldBuffers = ReBuffer(gl, 2, PIXELS);
+
+    // Set up to draw the scene periodically.
+    render();
+  }
+}
+
+function drawFlatBackground(gl) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+  gl.vertexAttribPointer(coordAttribute, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function pixelateVideo() {
+  pixelateBuffers.bindNext(gl);
+
+  var texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, document.getElementById('v'));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  gl.useProgram(pixelateShader);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.uniform1i(gl.getUniformLocation(pixelateShader, "video"), 0);
+  gl.uniform1f( gl.getUniformLocation(pixelateShader, "pixels"), PIXELS);
+
+  drawFlatBackground(gl);
+}
+
+function diffVideo() {
+  diffBuffer.bindNext(gl);
+
+  gl.useProgram(diffShader);
+
+  pixelateBuffers.uniform(gl,diffShader,1,'previous',1);
+  pixelateBuffers.uniform(gl,diffShader,0,'current',2);
+  gl.uniform1f( gl.getUniformLocation(diffShader, "pixels"), PIXELS);
+
+  drawFlatBackground(gl);
+}
+
+function field() {
+  fieldBuffers.bindNext(gl);
+
+  gl.useProgram(fieldShader);
+
+  fieldBuffers.uniform(gl,fieldShader,1,'previous',3);
+  diffBuffer.uniform(gl,fieldShader,0,'current',0);
+  gl.uniform1f( gl.getUniformLocation(fieldShader, "pixels"), PIXELS);
+
+  drawFlatBackground(gl);
+}
+
+function render() {
+  pixelateVideo();
+  diffVideo();
+  field();
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  gl.useProgram(onscreenShader);
+
+  fieldBuffers.uniform(gl,onscreenShader,0,'video',0);
+  gl.uniform1f( gl.getUniformLocation(onscreenShader, "width"), canvas.width);
+  gl.uniform1f( gl.getUniformLocation(onscreenShader, "height"), canvas.height);
+
+  drawFlatBackground(gl);
+
+  requestAnimationFrame(render);
+}
+
+function ReBuffer(gl, count, size, clamp) {
+  var buffers = [];
+  var index = -1;
+
+  for (var i=0; i<count; i++) {
+    var rttFramebuffer = gl.createFramebuffer();
+    rttFramebuffer.width = size;
+    rttFramebuffer.height = size;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rttFramebuffer);
+
+    var rttTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, rttTexture);
+    if (clamp) {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, rttFramebuffer.width, rttFramebuffer.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rttTexture, 0);
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    buffers.push( {framebuffer:rttFramebuffer, texture:rttTexture} );
+  }
+
+  return {
+    bindNext: function(gl) {
+      index = (index+1) % buffers.length;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, buffers[index].framebuffer);
+
+      gl.viewport(0, 0, size, size);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    },
+    uniform: function(gl,shader,offset,name,textureIndex) {
+      var buffer = buffers[(index + buffers.length - offset) % buffers.length];
+      gl.activeTexture(gl['TEXTURE'+textureIndex]);
+      gl.bindTexture(gl.TEXTURE_2D, buffer.texture);
+      gl.uniform1i(gl.getUniformLocation(shader, name), textureIndex);
+    }
+  }
+}
+
+function createProgram(gl, vertex, fragment) {
+  // init shaders
+  var fragmentShader = getShader(gl, fragment);
+  var vertexShader = getShader(gl, vertex);
+
+
+  var shaderProgram = gl.createProgram();
+  gl.attachShader(shaderProgram, vertexShader);
+  gl.attachShader(shaderProgram, fragmentShader);
+  gl.linkProgram(shaderProgram);
+  if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+    throw new Error("Unable to initialize the shader program.");
+  }
+  return shaderProgram;
+}
+
+function getShader(gl, id) {
+  var shaderScript = document.getElementById(id);
+  var source = [];
+  var currentChild = shaderScript.firstChild;
+  var shader;
+
+  while(currentChild) {
+    if (currentChild.nodeType == 3)
+      source.push( currentChild.textContent );
+    currentChild = currentChild.nextSibling;
+  }
+
+  if (shaderScript.type == "x-shader/x-fragment") {
+    shader = gl.createShader(gl.FRAGMENT_SHADER);
+  } else if (shaderScript.type == "x-shader/x-vertex") {
+    shader = gl.createShader(gl.VERTEX_SHADER);
+  }
+
+  gl.shaderSource(shader, source.join(''));
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error("An error occurred compiling the shaders: " + gl.getShaderInfoLog(shader));
+    throw new Error("GL Compilation Error");
+  }
+  return shader;
+}
+  </script>
+</html>
