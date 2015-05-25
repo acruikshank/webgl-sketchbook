@@ -71,6 +71,29 @@
       }
     </script>
 
+    <script id="velocity" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D previous;
+      uniform sampler2D positions;
+
+      void main(void) {
+
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+      }
+    </script>
+
+    <script id="position" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D previous;
+      uniform sampler2D velocities;
+
+      void main(void) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+      }
+    </script>
+
     <script id="shader-fs" type="x-shader/x-fragment">
       precision mediump float;
 
@@ -86,14 +109,42 @@
       }
     </script>
 
-    <!-- Vertex shader program -->
+    <script id="point" type="x-shader/x-fragment">
+      precision mediump float;
 
-    <script id="shader-vs" type="x-shader/x-vertex">
+      varying vec3 velocity;
+
+      void main(void) {
+        if (distance(gl_PointCoord.st, vec2(0.5,0.5)) > 0.5) {
+          discard;
+        }
+        gl_FragColor = vec4(1.0, 0.0, 0.5, 1.0);
+      }
+    </script>
+
+    <script id="point-cloud" type="x-shader/x-vertex">
+      precision mediump float;
+
+      attribute vec2 address;
+
+      uniform mat4 uMVMatrix;
+      uniform mat4 uPMatrix;
+      uniform sampler2D positions;
+      uniform sampler2D velocities;
+
+      varying vec3 velocity;
+
+      void main(void) {
+        velocity = texture2D(velocities, address).xyz;
+        gl_Position = uPMatrix * uMVMatrix * vec4(texture2D(positions, address).xyz, 1.0);
+        gl_PointSize = 2.0;
+      }
+    </script>
+
+    <script id="passthrough" type="x-shader/x-vertex">
       precision mediump float;
 
       attribute vec2 position;
-
-      uniform sampler2D video;
 
       void main(void) {
         gl_Position = vec4(position, 0.0, 1.0);
@@ -111,16 +162,17 @@
 var canvas;
 var gl;
 var triangleBuffer;
+var pointBuffer;
 var coordAttribute;
-var pixelateBuffer;
-var pixelateShader;
-var diffBuffer;
-var diffShader;
-var fieldBuffers;
-var fieldShader;
+var pixelateBuffer, pixelateShader;
+var diffBuffer, diffShader;
+var fieldBuffers, fieldShader;
+var velocityBuffers, velocityShader;
+var positionBuffers, positionShader;
+var pointCloudShader;
 var onscreenShader;
 var PIXELS = 64;
-
+var N = 128;
 
 navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
                         || navigator.mozGetUserMedia || navigator.msGetUserMedia;
@@ -144,11 +196,13 @@ function start() {
     gl.enable(gl.DEPTH_TEST);           // Enable depth testing
     gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
 
-    pixelateShader = createProgram(gl, 'shader-vs', 'pixelate');
-    diffShader = createProgram(gl, 'shader-vs', 'diff');
-    fieldShader = createProgram(gl, 'shader-vs', 'field');
+    pixelateShader = createProgram(gl, 'passthrough', 'pixelate');
+    diffShader = createProgram(gl, 'passthrough', 'diff');
+    fieldShader = createProgram(gl, 'passthrough', 'field');
+    velocityShader = createProgram(gl, 'passthrough', 'velocity');
+    positionShader = createProgram(gl, 'passthrough', 'position');
 
-    onscreenShader = createProgram(gl, 'shader-vs', 'shader-fs');
+    onscreenShader = createProgram(gl, 'passthrough', 'shader-fs');
     gl.useProgram(onscreenShader);
 
     coordAttribute = gl.getAttribLocation(onscreenShader, "position");
@@ -163,8 +217,24 @@ function start() {
     pixelateBuffers = ReBuffer(gl, 2, PIXELS);
     diffBuffer = ReBuffer(gl, 1, PIXELS);
     fieldBuffers = ReBuffer(gl, 2, PIXELS);
+    velocityBuffers = ReBuffer(gl, 2, N);
+    positionBuffers = ReBuffer(gl, 2, N);
 
-    // Set up to draw the scene periodically.
+    pointCloudShader = createProgram(gl, 'point-cloud', 'point');
+    gl.useProgram(pointCloudShader);
+
+    var vertexPositionAttribute = gl.getAttribLocation(pointCloudShader, "address");
+    gl.enableVertexAttribArray(vertexPositionAttribute);
+
+    var vertices = [];
+    for (var i=0; i<N; i++)
+      for (var j=0; j<N; j++)
+        vertices.push(i,j);
+
+    pointBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
     render();
   }
 }
@@ -173,6 +243,15 @@ function drawFlatBackground(gl) {
   gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
   gl.vertexAttribPointer(coordAttribute, 2, gl.FLOAT, false, 0, 0);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function drawPoints(gl) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffer);
+  gl.vertexAttribPointer(gl.getAttribLocation(velocityShader,'position'), 2, gl.FLOAT, false, 0, 0);
+
+  gl.drawArrays(gl.POINTS, 0, N*N);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
@@ -222,10 +301,34 @@ function field() {
   drawFlatBackground(gl);
 }
 
+function velocity() {
+  velocityBuffers.bindNext(gl);
+
+  gl.useProgram(velocityShader);
+
+  velocityBuffers.uniform(gl,velocityShader,1,'previous',4);
+  positionBuffers.uniform(gl,velocityShader,0,'positions',5);
+
+  drawPoints(gl);
+}
+
+function position() {
+  positionBuffers.bindNext(gl);
+
+  gl.useProgram(positionShader);
+
+  positionBuffers.uniform(gl,positionShader,1,'previous',5);
+  velocityBuffers.uniform(gl,positionShader,0,'velocitys',6);
+
+  drawPoints(gl);
+}
+
 function render() {
   pixelateVideo();
   diffVideo();
   field();
+  velocity();
+  position();
 
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -298,7 +401,7 @@ function createProgram(gl, vertex, fragment) {
   gl.attachShader(shaderProgram, fragmentShader);
   gl.linkProgram(shaderProgram);
   if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-    throw new Error("Unable to initialize the shader program.");
+    throw new Error("Unable to link " + vertex + " and " + fragment);
   }
   return shaderProgram;
 }
