@@ -134,6 +134,7 @@
       uniform mat4 addressMatrix;
 
       uniform sampler2D positions;
+      uniform float pointSize;
 
       varying vec2 coord;
 
@@ -143,7 +144,7 @@
         vec3 position = texture2D(positions, address / 128.0).xyz;
         gl_Position = uPMatrix * uMVMatrix * addressMatrix * vec4(position, 1.0);
         // gl_Position = uPMatrix * uMVMatrix * addressMatrix * vec4(address, 0, 1.0);
-        gl_PointSize = 32.0;
+        gl_PointSize = pointSize;
       }
     </script>
 
@@ -371,6 +372,8 @@ function render() {
   positionBuffers.uniform(gl,pointCloudShader,0,'positions',7);
   velocityBuffers.uniform(gl,pointCloudShader,0,'velocities',8);
   fieldBuffers.uniform(gl,pointCloudShader,0,'field',4);
+  gl.uniform1f( gl.getUniformLocation(pointCloudShader, "pointSize"), 16 * (window.devicePixelRatio||1));
+
 
   gl.drawArrays(gl.POINTS, 0, N*N);
 
