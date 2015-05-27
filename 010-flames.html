@@ -16,7 +16,7 @@
       uniform sampler2D video;
       uniform float pixels;
 
-      #define SMOOTH 16.0
+      #define SMOOTH 2.0
 
       void main(void) {
         vec2 p = (gl_FragCoord.st / pixels) * vec2(-1.0,1.0) + vec2(1.0,0.0);
@@ -134,6 +134,7 @@
       uniform mat4 addressMatrix;
 
       uniform sampler2D positions;
+      uniform float pointSize;
 
       varying vec2 coord;
 
@@ -143,7 +144,7 @@
         vec3 position = texture2D(positions, address / 128.0).xyz;
         gl_Position = uPMatrix * uMVMatrix * addressMatrix * vec4(position, 1.0);
         // gl_Position = uPMatrix * uMVMatrix * addressMatrix * vec4(address, 0, 1.0);
-        gl_PointSize = 32.0;
+        gl_PointSize = pointSize;
       }
     </script>
 
@@ -181,6 +182,7 @@ var PIXELS = 128;
 var N = 128;
 var dT = .1;
 var damping = .7;
+var pointSize = 16;
 
 navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
                         || navigator.mozGetUserMedia || navigator.msGetUserMedia;
@@ -371,6 +373,8 @@ function render() {
   positionBuffers.uniform(gl,pointCloudShader,0,'positions',7);
   velocityBuffers.uniform(gl,pointCloudShader,0,'velocities',8);
   fieldBuffers.uniform(gl,pointCloudShader,0,'field',4);
+  gl.uniform1f( gl.getUniformLocation(pointCloudShader, "pointSize"), pointSize * (window.devicePixelRatio||1));
+
 
   gl.drawArrays(gl.POINTS, 0, N*N);
 
@@ -428,10 +432,13 @@ function ReBuffer(gl, count, size, options) {
 }
 
 function createProgram(gl, vertex, fragment) {
-  // init shaders
-  var fragmentShader = getShader(gl, fragment);
-  var vertexShader = getShader(gl, vertex);
+  var libraryScripts = document.querySelectorAll("script[type='x-shader/x-library']");
+  for (var i=0, libraries={}, script; script = libraryScripts[i]; i++)
+    libraries[script.id] = script.innerText;
 
+  // init shaders
+  var fragmentShader = getShader(gl, fragment, libraries);
+  var vertexShader = getShader(gl, vertex, libraries);
 
   var shaderProgram = gl.createProgram();
   gl.attachShader(shaderProgram, vertexShader);
@@ -443,26 +450,20 @@ function createProgram(gl, vertex, fragment) {
   return shaderProgram;
 }
 
-function getShader(gl, id) {
-  var shaderScript = document.getElementById(id);
-  var source = [];
-  var currentChild = shaderScript.firstChild;
-  var shader;
+function getShader(gl, id, libraries) {
+  var script = document.getElementById(id);
+  var shader = gl.createShader({
+    "x-shader/x-fragment": gl.FRAGMENT_SHADER,
+    "x-shader/x-vertex": gl.VERTEX_SHADER
+  }[script.type]);
 
-  while(currentChild) {
-    if (currentChild.nodeType == 3)
-      source.push( currentChild.textContent );
-    currentChild = currentChild.nextSibling;
-  }
+  var source = script.innerText.replace(/!!include (\w+)/g, function(_,name) {
+    return libraries[name];
+  });
 
-  if (shaderScript.type == "x-shader/x-fragment") {
-    shader = gl.createShader(gl.FRAGMENT_SHADER);
-  } else if (shaderScript.type == "x-shader/x-vertex") {
-    shader = gl.createShader(gl.VERTEX_SHADER);
-  }
-
-  gl.shaderSource(shader, source.join(''));
+  gl.shaderSource(shader, source);
   gl.compileShader(shader);
+
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     console.error("An error occurred compiling the shaders: " + gl.getShaderInfoLog(shader));
     throw new Error("GL Compilation Error");
