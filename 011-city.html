@@ -20,7 +20,7 @@
         float diff = max(0.0, sin(100.0*theta + 628.31*texCoord.z) - .8) * 1.0;
         float alpha = 1.0-.65*abs(atan((50.0-10.0*diff)*texCoord.x)) * (1.0 - pow(texCoord.y,16.0));
         //float alpha = exp(- texCoord.x * texCoord.x / .0005) * (1.0 - pow(texCoord.y,40.0));
-        alpha *= .6 + .4 * pow(diff, 4.0);
+        alpha *= .7 + .4 * pow(diff, 4.0);
 //        gl_FragColor = vec4(0.9 - .9*diff - .6*diff*diff, .96, 1.0, alpha);
         gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
       }
