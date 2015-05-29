@@ -17,11 +17,12 @@
       varying vec3 texCoord;
 
       void main(void) {
-        float diff = max(0.0, sin(5.0*theta + 62.831*texCoord.z) - .8) * 2.0;
-        // float alpha = 1.0-.65*abs(atan((50.0-10.0*diff)*texCoord.x));
-        float alpha = 1.0 * exp(- texCoord.x * texCoord.x / .0005) * (1.0 - pow(texCoord.y,40.0));
-        alpha *= .2 + .8 * diff;
-        gl_FragColor = vec4(0.9 - .9*diff - .6*diff*diff, .96, 1.0, alpha);
+        float diff = max(0.0, sin(100.0*theta + 628.31*texCoord.z) - .8) * 1.0;
+        float alpha = 1.0-.65*abs(atan((50.0-10.0*diff)*texCoord.x)) * (1.0 - pow(texCoord.y,16.0));
+        //float alpha = exp(- texCoord.x * texCoord.x / .0005) * (1.0 - pow(texCoord.y,40.0));
+        alpha *= .6 + .4 * pow(diff, 4.0);
+//        gl_FragColor = vec4(0.9 - .9*diff - .6*diff*diff, .96, 1.0, alpha);
+        gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
       }
     </script>
     <script id="shader-vs" type="x-shader/x-vertex">
@@ -73,9 +74,9 @@ var positionBuffer, otherBuffer, coordBuffer;
 var lineWidth = 0.8;
 var spread = .5;
 var radius = 15;
-var N = 5000;
-var dt = .0015;
-var resetInterval = 24000;
+var N = 10000;
+var dt = .0005;
+var resetInterval = 60000;
 var DIRS = [[0,0,1],[0,0,-1],[0,1,0],[0,-1,0],[1,0,0],[-1,0,0]];
 
 
@@ -111,13 +112,13 @@ start()
 
 function start() {
   canvas = document.getElementById("c");
-  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
-  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+  canvas.width = canvas.offsetWidth * 2.0;
+  canvas.height = canvas.offsetHeight * 2.0;
 
   gl = canvas.getContext("experimental-webgl");
 
   if (gl) {
-    gl.clearColor(0.0,0,0, 1.0);  // Clear to black, fully opaque
+    gl.clearColor(1,1,1, 1.0);  // Clear to black, fully opaque
     gl.clearDepth(1.0);                 // Clear everything
     gl.disable(gl.DEPTH_TEST);           // Enable depth testing
     gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
@@ -217,7 +218,7 @@ function render() {
 
   mvMatrix = Matrix.I(4);
 
-  var r = 40;
+  var r = 20;
   var camera = [r*Math.sin(time), 0, -r*Math.cos(time)];
   time += dt;
 
