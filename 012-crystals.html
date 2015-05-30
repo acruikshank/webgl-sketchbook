@@ -12,15 +12,16 @@
     <script id="shader-fs" type="x-shader/x-fragment">
       precision mediump float;
 
-      varying vec3 normal;
+      // varying vec3 position;
+      varying vec4 color;
 
       void main(void) {
-        const vec3 light = vec3(0.3,-1.0,0.2);
-        const vec3 color1 = vec3(0.0,.02,.1);
-        const vec3 color2 = vec3(0.9,.2,.02);
-        float brightness = max(dot(normalize(light),normal),0.0);
-        gl_FragColor = vec4(color2, 1.0);
+        // const vec3 light = vec3(0.3,-1.0,0.2);
+        const vec3 color1 = vec3(0.0,.3,.25);
+        // const vec3 color2 = vec3(1.0,1.0,1.0);
+        // float brightness = pow(position.z, 3.0);
         // gl_FragColor = vec4(mix(color1,color2,brightness), 1.0);
+        gl_FragColor = color;
       }
     </script>
     <script id="shader-vs" type="x-shader/x-vertex">
@@ -30,21 +31,29 @@
 
       uniform mat4 uMVMatrix;
       uniform mat4 uPMatrix;
-      uniform float uTime;
+      uniform float uMod;
+      uniform float uModInv;
 
-      varying float dist;
-      varying vec3 normal;
+      // varying vec3 position;
+      varying vec4 color;
 
 
       void main(void) {
-        const float N = 512.0;
         const float D = 200.0;
         const vec3 DP = vec3(.1,0.0,0.0);
 
-        float height = -5.0 + (mod(aVertexPosition.x * aVertexPosition.y, 43.0))/43.0;
-        vec2 xy = -vec2(D)*((aVertexPosition)/N-0.5);
-        vec3 position = vec3(xy,height);
-        gl_Position = uPMatrix * uMVMatrix * vec4(position.xzy, 1.0);
+        const vec3 color1 = vec3(0.4,.7,.65);
+        const vec3 color2 = vec3(1.0,1.0,1.0);
+
+
+        float height = mod(aVertexPosition.x * aVertexPosition.y, uMod) * uModInv;
+        vec2 xy = -D*((aVertexPosition)*.00195-0.5);
+        // position = vec3(xy,height);
+        vec4 point = uMVMatrix * vec4(xy.x, -6.0 + 0.60*height*length(xy), xy.y, 1.0);
+        gl_Position = uPMatrix * point;
+
+        float brightness = pow(height, 3.0);
+        color = vec4(mix(color1,color2,brightness), 1.0);
       }
     </script>
   </head>
@@ -65,10 +74,10 @@ var vertexPositionAttribute;
 var N = 512;
 var time = 0;
 var path = [[.5,1]];
-var pathTime = 100;
+var pathTime = 10;
 var pathInterval = 0;
 var moveProb = 1.0;
-var moveDist = .1;
+var moveDist = .4;
 var segmentProb = .2;
 var minPathTime = 1000;
 var maxPathTime = 1000;
@@ -162,7 +171,7 @@ function render() {
 
   var theta = 2* Math.PI * (offset[0] - .5);
   var r = 40;
-  var camera = [r*Math.sin(theta), 8*(offset[1]-.2), -r*Math.cos(theta)];
+  var camera = [r*Math.sin(theta), 32.0, -r*Math.cos(theta)];
 
   mvMatrix = mvMatrix
     .x(makeLookAt(camera[0], camera[1], camera[2], 0, 0, 0, 0, 1.0, 0))
@@ -176,14 +185,23 @@ function render() {
   var mvUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
   gl.uniformMatrix4fv(mvUniform, false, new Float32Array(mvMatrix.flatten()));
 
-  var timeUniform = gl.getUniformLocation(shaderProgram, "uTime");
-  gl.uniform1f(timeUniform, time);
-  time += .00023282;
+  var modUniform = gl.getUniformLocation(shaderProgram, "uMod");
+  gl.uniform1f(modUniform, modT(time) );
+
+  var modInvUniform = gl.getUniformLocation(shaderProgram, "uModInv");
+  gl.uniform1f(modInvUniform, 1.0 / modT(time));
+
+  time += .00000008;
 
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 2*(N*N-1));
 
   requestAnimationFrame(render);
+}
+
+function modT(time) {
+  var variance = 80000000;
+  return 29.95 + Math.round( 500 * time * variance ) / variance;
 }
 
 function reflect(p, about) {
