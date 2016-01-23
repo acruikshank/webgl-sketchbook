@@ -1,0 +1,87 @@
+<html>
+<head>
+  <title>test audio</title>
+  <style>html, body { height: 100%; margin:0; } canvas { width: 100%; height: 100%; }</style>
+</head>
+<body>
+  <canvas id='visualization'></canvas>
+</body>
+<script>
+var audioCtx = new (window.AudioContext || window.webkitAudioContext)(); // define audio context
+
+var analyser = audioCtx.createAnalyser();
+var canvas = document.getElementById('visualization');
+var canvasCtx = canvas.getContext('2d');
+var WIDTH = canvas.width = canvas.offsetWidth * 2;
+var HEIGHT = canvas.height = canvas.offsetHeight * 2;
+
+navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
+                        || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+navigator.getUserMedia (
+  // constraints - only audio needed for this app
+  {
+    audio: true
+  },
+
+  // Success callback
+  function(stream) {
+    source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    // analyser.connect(audioCtx.destination); // connecting the different audio graph nodes together
+
+    visualize(stream);
+  },
+
+  // Error callback
+  function(err) {
+    console.log('The following gUM error occured: ' + err);
+  }
+);
+
+function visualize(stream) {
+  analyser.fftSize = 1024;
+  var bufferLength = analyser.frequencyBinCount; // half the FFT value
+  var dataArray = new Float32Array(bufferLength); // create an array to store the data
+  var buckets = bufferLength / 8;
+  var offset = 0;//bufferLength / 64;
+
+  canvasCtx.clearRect(0, 0, WIDTH, HEIGHT);
+
+  function draw() {
+
+    drawVisual = requestAnimationFrame(draw);
+
+    analyser.getFloatFrequencyData(dataArray); // get waveform data and put it into the array created above
+
+    canvasCtx.fillStyle = 'rgba(220,255,140,.02)'; // draw wave with canvas
+    canvasCtx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    canvasCtx.lineWidth = 1;
+    canvasCtx.strokeStyle = 'rgba(0,0,0,.4)';
+    canvasCtx.fillStyle = 'rgba(255,0,255,.02)'; // draw wave with canvas
+
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(0, HEIGHT);
+
+    var sliceWidth = WIDTH * 1.0 / buckets;
+    var x = 0;
+
+    for(var i = offset; i <= buckets + offset; i++) {
+
+      var v = (110+dataArray[i])*.5;
+      var y = HEIGHT * (1 - v);
+
+      canvasCtx.lineTo(x, y);
+
+      x += sliceWidth;
+    }
+    canvasCtx.lineTo(WIDTH,HEIGHT);
+
+    canvasCtx.fill();
+    canvasCtx.stroke();
+  };
+
+  draw();
+}
+</script>
+</html>

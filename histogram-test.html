@@ -1,0 +1,405 @@
+<html>
+  <head>
+    <title>Histogram</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style type="text/css">
+      html, body { margin:0; width: 100%; height:100%; background: #333; }
+      canvas {display: inline-block; height: 360px; margin: 10px; border: 1px solid; vertical-align: top;}
+      video {display: inline-block; margin: 10px;vertical-align: top;}
+    </style>
+    <script src="sylvester.js" type="text/javascript"></script>
+    <script src="glUtils.js" type="text/javascript"></script>
+    <script src="sketchbook-util.js" type="text/javascript"></script>
+
+    <script id="flat" type="x-shader/x-vertex">
+      precision mediump float;
+
+      attribute vec2 position;
+
+      void main(void) {
+        gl_Position = vec4(position, 0.0, 1.0);
+      }
+    </script>
+
+    <script id="histogram" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D last;
+      uniform float texelSize;
+
+      void main(void) {
+        vec2 p = texelSize * gl_FragCoord.st;
+        vec4 sample = texture2D(last,p);
+        float xindex = mod(floor(gl_FragCoord.s), 2.0);
+        float yindex = mod(floor(gl_FragCoord.t), 2.0);
+        gl_FragColor =
+          vec4((1.0-xindex) * (1.0-yindex)) * vec4(lessThanEqual(sample,vec4(0.25)))
+          + vec4(xindex * (1.0-yindex)) * vec4(greaterThan(sample, vec4(0.25))) * vec4(lessThanEqual(sample, vec4(0.5)))
+          + vec4((1.0-xindex) * yindex) * vec4(greaterThan(sample, vec4(0.5))) * vec4(lessThanEqual(sample, vec4(0.75)))
+          + vec4(xindex * yindex) * vec4(greaterThan(sample, vec4(0.75)));
+      }
+    </script>
+
+    <script id="downsample" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D last;
+      uniform float texelSize;
+
+      void main(void) {
+        vec2 p = texelSize * (2.0 * floor(gl_FragCoord.st)
+          - vec2(mod(floor(gl_FragCoord.s), 2.0), mod(floor(gl_FragCoord.t), 2.0)));
+        gl_FragColor = (texture2D(last,p)
+          + texture2D(last,p + 2.0*vec2(0.0,texelSize))
+          + texture2D(last,p + 2.0*vec2(texelSize,0.0))
+          + texture2D(last,p + 2.0*vec2(texelSize,texelSize))) * .25;
+      }
+    </script>
+
+    <script id="corrected-luma" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D last;
+      uniform vec2 texelSize;
+      uniform vec3 quartiles[3];
+      uniform vec3 low[4];
+      uniform vec3 high[4];
+
+      void main(void) {
+        vec2 p = vec2(1.0) - texelSize * gl_FragCoord.st;
+        vec3 s = texture2D(last,p).rgb;
+        vec3 isQ1 = vec3(lessThan(s,quartiles[0]));
+        vec3 isQ2 = vec3(greaterThanEqual(s,quartiles[0])) * vec3(lessThan(s,quartiles[1]));
+        vec3 isQ3 = vec3(greaterThanEqual(s,quartiles[1])) * vec3(lessThan(s,quartiles[2]));
+        vec3 isQ4 = vec3(greaterThanEqual(s,quartiles[2]));
+        vec3 luma = isQ1 * mix(low[0],high[0],s)
+          + isQ2 * mix(low[1],high[1],s)
+          + isQ3 * mix(low[2],high[2],s)
+          + isQ4 * mix(low[3],high[3],s)
+          ;
+
+        // vec3 luma = isQ1 * .25 * s / quartiles[0]
+        //   + isQ2 * (.25 + .25*(s - quartiles[0]) / (quartiles[1] - quartiles[0]))
+        //   + isQ3 * (.50 + .25*(s - quartiles[1]) / (quartiles[2] - quartiles[1]))
+        //   + isQ4 * (.75 + .25*(s - quartiles[2]) / (1.0 - quartiles[2]));
+        gl_FragColor = vec4(vec3(length(luma)), 1.0);
+      }
+    </script>
+
+    <script id="uncorrected-luma" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D last;
+      uniform vec2 texelSize;
+
+      void main(void) {
+        vec2 p = vec2(1.0) - texelSize * gl_FragCoord.st;
+        vec3 s = texture2D(last,p).rgb;
+        gl_FragColor = vec4(vec3(length(s)), 1.0);
+      }
+    </script>
+
+    <script id="blit" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform sampler2D last;
+      uniform float texelSize;
+
+      void main(void) {
+        vec2 p = texelSize * gl_FragCoord.st;
+        gl_FragColor = texture2D(last,p);
+      }
+    </script>
+  </head>
+
+  <body>
+    <canvas id="output" width="480" height="360"></canvas>
+    <canvas id="output2" width="480" height="360"></canvas>
+    <video id="v" autoplay width="480" height="360"></video>
+    <canvas id="glcanvas" width="360" height="360"></canvas>
+    <canvas id="c" width="600" height="450"></canvas>
+  </body>
+  <script>
+/* Compute uniform correction:
+Aquire the 4 part histogram (quartiles).
+For each color channel:
+Assume the image samples have come from a uniform distribution that has
+  been multiplied by a cubic polynomial, P(x).
+If you were to sort all these these samples they'd look roughly like the line
+  xP(x).
+Our quartiles tell us the first Q1 sorted samples will be less than .25, the
+  first Q2 will be less than .5, Q3 will be less than .75 and Q4 less than 1.
+Use Q1*P(Q1) = .25, Q2*P(Q2) = .5, etc. to solve for the coefficients of P.
+A corrected sample x is x/P(x). If our uniform assumption were true and our
+  appoximation of P exact, this would recove the line y=x.
+
+ */
+var canvas;
+var gl;
+var downsampleShader, histogramShader, blitShader, correctedShader, uncorrectedShader;
+var coordAttribute;
+var downsampleBuffers = [];
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+var cw = canvas.width = 1024;
+var ch = canvas.height = 1024;
+var count=0;
+ctx.lineWidth = 6;
+ctx.lineJoin = 'round';
+ctx.translate(0,ch)
+ctx.scale(1.0, -1.0)
+
+var outputGL = document.getElementById('output').getContext("experimental-webgl");
+var outputGL2 = document.getElementById('output2').getContext("experimental-webgl");
+
+SketchbookUtil.startWebcam(document.getElementById('v'), start);
+
+function start() {
+  canvas = document.getElementById("glcanvas");
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+
+  gl = canvas.getContext("experimental-webgl");
+
+  if (gl) {
+    gl.clearColor(0, 0, 0, 1.0);  // Clear to black, fully opaque
+
+    for (var i=1; i<6; i++)
+      downsampleBuffers.push(ReBuffer(gl, 1, 1<<i));
+
+    downsampleShader = SketchbookUtil.createProgram(gl, 'flat', 'downsample');
+    histogramShader = SketchbookUtil.createProgram(gl, 'flat', 'histogram');
+    blitShader = SketchbookUtil.createProgram(gl, 'flat', 'blit');
+    correctedShader = SketchbookUtil.createProgram(outputGL, 'flat', 'corrected-luma');
+    uncorrectedShader = SketchbookUtil.createProgram(outputGL2, 'flat', 'uncorrected-luma');
+
+    render();
+  }
+}
+
+function downsampleVideo() {
+  var buffer = downsampleBuffers[downsampleBuffers.length-1];
+  buffer.bindNext(gl);
+
+  var texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, document.getElementById('v'));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  gl.useProgram(histogramShader);
+
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.uniform1i(gl.getUniformLocation(histogramShader, "last"), 0);
+  gl.uniform1f(gl.getUniformLocation(histogramShader, "texelSize"), 1/(buffer.size));
+
+
+  SketchbookUtil.drawFlatBackground(gl, histogramShader);
+
+  downsample(downsampleBuffers.length-2);
+}
+
+
+function downsample(index) {
+  if (index < 0)
+    return;
+
+  gl.useProgram(downsampleShader);
+
+  downsampleBuffers[index].bindNext(gl);
+  downsampleBuffers[index+1].uniform(gl,downsampleShader,0,'last',index+1);
+  gl.uniform1f(gl.getUniformLocation(downsampleShader, "texelSize"), 1/downsampleBuffers[index+1].size);
+  SketchbookUtil.drawFlatBackground(gl, downsampleShader, true);
+
+  downsample(index-1);
+}
+
+function render() {
+  downsampleVideo();
+
+  var width = downsampleBuffers[0].size;
+  var height = width;
+  pixels = new Uint8Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  var quartiles = [
+    pixels[0]/255, pixels[1]/255, pixels[2]/255,
+    (pixels[0]+pixels[4])/255, (pixels[1]+pixels[5])/255, (pixels[2]+pixels[6])/255,
+    (pixels[0]+pixels[4]+pixels[8])/255, (pixels[1]+pixels[5]+pixels[9])/255,
+      (pixels[2]+pixels[6]+pixels[10])/255
+  ]
+
+  var lower = [0,0,0].concat(quartiles).map(function(x,i) { return [.25*Math.floor(i/3),x] })
+  var upper = quartiles.concat([1,1,1]).map(function(x,i) { return [.25+.25*Math.floor(i/3),x] })
+  var lows = lower.map(function(low,i) { return intercept0(low[0], low[1], upper[i][0], upper[i][1]) })
+  var highs = lower.map(function(low,i) { return intercept1(low[0], low[1], upper[i][0], upper[i][1]) })
+  quartiles = [.25, .25, .25, .5, .5, .5, .75, .75, .75];
+
+  gl.useProgram(blitShader);
+  var bufferIndex = 0;
+  var buffer = downsampleBuffers[bufferIndex];
+  buffer.uniform(gl,blitShader,0,'last',bufferIndex);
+  gl.uniform1f(gl.getUniformLocation(blitShader, "texelSize"), 1/362);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, 512, 512);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  SketchbookUtil.drawFlatBackground(gl, blitShader);
+
+
+  var texture = outputGL.createTexture();
+  outputGL.bindTexture(outputGL.TEXTURE_2D, texture);
+  outputGL.texImage2D(outputGL.TEXTURE_2D, 0, outputGL.RGBA, outputGL.RGBA, outputGL.UNSIGNED_BYTE, document.getElementById('v'));
+  outputGL.texParameteri(outputGL.TEXTURE_2D, outputGL.TEXTURE_WRAP_S, outputGL.CLAMP_TO_EDGE);
+  outputGL.texParameteri(outputGL.TEXTURE_2D, outputGL.TEXTURE_WRAP_T, outputGL.CLAMP_TO_EDGE);
+  outputGL.texParameteri(outputGL.TEXTURE_2D, outputGL.TEXTURE_MIN_FILTER, outputGL.LINEAR);
+  outputGL.bindTexture(outputGL.TEXTURE_2D, null);
+
+  outputGL.useProgram(correctedShader);
+  outputGL.activeTexture(outputGL.TEXTURE0);
+  outputGL.bindTexture(outputGL.TEXTURE_2D, texture);
+  outputGL.uniform2f(outputGL.getUniformLocation(correctedShader, "texelSize"), 1/480, 1/360);
+  outputGL.uniform3fv(outputGL.getUniformLocation(correctedShader, "quartiles"), quartiles);
+  outputGL.uniform3fv(outputGL.getUniformLocation(correctedShader, "low"), lows);
+  outputGL.uniform3fv(outputGL.getUniformLocation(correctedShader, "high"), highs);
+
+  outputGL.bindFramebuffer(outputGL.FRAMEBUFFER, null);
+  outputGL.viewport(0, 0, 480, 360);
+  outputGL.clear(outputGL.COLOR_BUFFER_BIT | outputGL.DEPTH_BUFFER_BIT);
+  SketchbookUtil.drawFlatBackground(outputGL, correctedShader);
+
+  var texture = outputGL2.createTexture();
+  outputGL2.bindTexture(outputGL2.TEXTURE_2D, texture);
+  outputGL2.texImage2D(outputGL2.TEXTURE_2D, 0, outputGL2.RGBA, outputGL2.RGBA, outputGL2.UNSIGNED_BYTE, document.getElementById('v'));
+  outputGL2.texParameteri(outputGL2.TEXTURE_2D, outputGL2.TEXTURE_WRAP_S, outputGL2.CLAMP_TO_EDGE);
+  outputGL2.texParameteri(outputGL2.TEXTURE_2D, outputGL2.TEXTURE_WRAP_T, outputGL2.CLAMP_TO_EDGE);
+  outputGL2.texParameteri(outputGL2.TEXTURE_2D, outputGL2.TEXTURE_MIN_FILTER, outputGL2.LINEAR);
+  outputGL2.bindTexture(outputGL2.TEXTURE_2D, null);
+
+  outputGL2.useProgram(uncorrectedShader);
+  outputGL2.activeTexture(outputGL2.TEXTURE0);
+  outputGL2.bindTexture(outputGL2.TEXTURE_2D, texture);
+  outputGL2.uniform2f(outputGL2.getUniformLocation(uncorrectedShader, "texelSize"), 1/480, 1/360);
+
+  outputGL2.bindFramebuffer(outputGL2.FRAMEBUFFER, null);
+  outputGL2.viewport(0, 0, 480, 360);
+  outputGL2.clear(outputGL2.COLOR_BUFFER_BIT | outputGL2.DEPTH_BUFFER_BIT);
+  SketchbookUtil.drawFlatBackground(outputGL2, uncorrectedShader);
+
+
+  ctx.fillStyle = 'rgba(52,52,52,.4)'
+  ctx.fillRect(0,0,cw,ch);
+
+  ctx.lineWidth = 6;
+  for (var i=0; i<3; i++) {
+    ctx.strokeStyle = ['#f00','#0f0','#00f'][i];
+    ctx.beginPath();
+    ctx.moveTo(0, 0)
+    for (var j=0; j<cw; j++) {
+      var x = j/cw;
+      if (x < .25) ctx.lineTo(j,ch*lerp(lows[0+i],highs[0+i],x))
+      else if (x < .5) ctx.lineTo(j,ch*lerp(lows[3+i],highs[3+i],x))
+      else if (x < .75) ctx.lineTo(j,ch*lerp(lows[6+i],highs[6+i],x))
+      else ctx.lineTo(j,ch*lerp(lows[9+i],highs[9+i],x))
+    }
+    ctx.stroke();
+  }
+
+
+
+  // var scale = 5;
+  // ctx.strokeStyle = '#f00';
+
+  // var redCoefficients = solveCoefficients([
+  //   [pixels[0]/255,.25],
+  //   [(pixels[0]+pixels[4])/255,.5],
+  //   [(pixels[0]+pixels[4]+pixels[8])/255,.75],
+  //   [1,1]
+  //   // [.25,.25],
+  //   // [.56,.5],
+  //   // [.75,.75],
+  //   // [1,1],
+  // ])
+
+  //   ctx.moveTo(0, 0)
+  //   ctx.lineWidth = 6;
+  //   ctx.beginPath();
+  // ctx.arc(cw*pixels[0]/255, ch*.25, 5, 0, 2*Math.PI, true);
+  // ctx.stroke();
+  // ctx.beginPath();
+  // ctx.arc(cw*(pixels[0]+pixels[4])/255, ch*.5, 5, 0, 2*Math.PI, true);
+  // ctx.stroke();
+  // ctx.beginPath();
+  // ctx.arc(cw*(pixels[0]+pixels[4]+pixels[8])/255, ch*.75, 5, 0, 2*Math.PI, true);
+  // ctx.stroke();
+  // ctx.beginPath();
+  // ctx.arc(cw, ch, 5, 0, 2*Math.PI, true);
+  // ctx.stroke();
+
+  // ctx.beginPath();
+  // ctx.moveTo(0, 0)
+  // ctx.lineWidth = 1.5;
+  // for (var i=1; i<=cw; i++) ctx.lineTo(i, ch * (i/cw) * solution(i/cw, redCoefficients) );
+  //
+  // ctx.stroke();
+  //
+  // ctx.strokeStyle = '#0f0';
+  // ctx.beginPath();
+  // ctx.moveTo(0, scale*pixels[1])
+  // for (var i=1; i<4; i++) ctx.lineTo(cw * i / 3, scale*pixels[i*4 + 1]);
+  // ctx.stroke();
+  //
+  // ctx.strokeStyle = '#00f';
+  // ctx.beginPath();
+  // ctx.moveTo(0, scale*pixels[2])
+  // for (var i=1; i<4; i++) ctx.lineTo(cw * i / 3, scale*pixels[i*4+2]);
+  // ctx.stroke();
+
+  requestAnimationFrame(render);
+}
+
+function lerp(a,b,x) {
+  return a + x * (b - a);
+}
+
+function intercept0(x1,y1,x2,y2) {
+  if (x1==x2) return y1;
+  var slope = (y2-y1)/(x2-x1);
+  return y1 - x1 * slope;
+}
+
+function intercept1(x1,y1,x2,y2) {
+  if (x1==x2) return y2;
+  var slope = (y2-y1)/(x2-x1);
+  return y1 - (x1 - 1) * slope;
+}
+
+function solution(x, c) {
+  return x*x*x*c[0] + x*x*c[1] + x*c[2] + c[3];
+}
+
+function solveCoefficients(points) {
+  var equations = $M([
+    matrixRow(points[0][0], points[0][1]),
+    matrixRow(points[1][0], points[1][1]),
+    matrixRow(points[2][0], points[2][1]),
+    matrixRow(points[3][0], points[3][1])
+  ]);
+
+  var eqns = equations.toRightTriangular();
+
+  var a = eqns.e(4,5) / eqns.e(4,4);
+  var b = (eqns.e(3,5) - a*eqns.e(3,4)) / eqns.e(3,3);
+  var c = (eqns.e(2,5) - a*eqns.e(2,4) - b*eqns.e(2,3)) / eqns.e(2,2);
+  var d = (eqns.e(1,5) - a*eqns.e(1,4) - b*eqns.e(1,3) - c*eqns.e(1,2)) / eqns.e(1,1);
+  return [a,b,c,d];
+}
+
+function matrixRow(x,y) {
+  return [x, x*x, x*x*x, x*x*x*x, y];
+}
+  </script>
+</html>
