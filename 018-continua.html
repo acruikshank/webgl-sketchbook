@@ -1,0 +1,311 @@
+<html>
+  <head>
+    <title>Network</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style type="text/css">
+      html, body, canvas { margin:0; width: 100%; height:100%; overflow: hidden;}
+      xcanvas {width: 49%; vertical-align: top;}
+      video {position: absolute;}
+    </style>
+    <script src="sylvester.js" type="text/javascript"></script>
+    <script src="glUtils.js" type="text/javascript"></script>
+    <script id="shader-fs" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform float theta;
+
+      varying vec3 texCoord;
+      varying float z;
+
+      void main(void) {
+        float diff = max(0.0, sin(5.0*theta + 628.31*texCoord.z) - .8) * 5.0;
+        float alpha = clamp(8.0*(1.0 - 1.0*abs(texCoord.x)), 0.0, 1.0);
+        gl_FragColor = vec4(mix(vec3(0.1,0.0,0.2),vec3(2.2, 1.8, 0.8),alpha - .018*(z-5.0)), 1.0*alpha);
+      }
+    </script>
+    <script id="shader-vs" type="x-shader/x-vertex">
+      precision mediump float;
+
+      attribute vec3 position;
+      attribute vec3 other;
+      attribute vec3 coord;
+
+      uniform vec3 camera;
+      uniform mat4 uMVMatrix;
+      uniform mat4 uPMatrix;
+      uniform float lineWidth;
+
+      varying vec3 texCoord;
+      varying float z;
+
+      void main(void) {
+        vec3 offset = position + lineWidth * coord.x * normalize( cross(position-camera, coord.y*(other-position)) );
+        texCoord = coord;
+        vec4 projected = uPMatrix * uMVMatrix * vec4(offset, 1.0);
+        z = projected.z;
+        gl_Position = projected;
+      }
+    </script>
+  </head>
+
+  <body>
+    <canvas id="c">
+      Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
+    </canvas>
+  </body>
+  <script>
+/*
+Texturized Lines:
+For each line (p1,p2), add p1,p2,w,p1,p2,-w,p2,p1,w,p2,p1,-w to buffer.
+This makes 3 attributes per vertex: position, other, width.
+Render a triangle strip.
+In vertex shader, compute the view matrix without perspective and use it to compute eye=vm*(0,0,1).
+gl_Position=position + width * norm(cross(eye, other - position))
+Pass width or abs(width)/width to fragment shader as with across line.
+Possibly create a new attribute to distinguish between p1 and p2 in texture.
+ */
+
+var canvas;
+var gl;
+var lineBuffer;
+var mvMatrix;
+var perspectiveMatrix;
+var shaderProgram;
+var positionBuffer, otherBuffer, coordBuffer;
+var cameraR = 45;
+var cameraDelta = 10;
+var cameraFreq = 1.8832;
+var lineWidth = 0.02;
+var spread = 2.00;
+var radius = 30;
+var N = 128;
+var Ns = 40;
+var Ntriangles;
+var crossings = 0;
+var dt = .00075;
+var resetInterval = 240000;
+
+var v = {
+  norm : function(v) { return Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]); },
+  add : function(v0,v1) { return [v0[0]+v1[0],v0[1]+v1[1],v0[2]+v1[2]]; },
+  sub : function(v0,v1) { return [v0[0]-v1[0],v0[1]-v1[1],v0[2]-v1[2]]; },
+  dot : function(v0,v1) { return v0[0]*v1[0] + v0[1]*v1[1] + v0[2]*v1[2]; },
+  scale : function(v,s) { return [v[0]*s,v[1]*s,v[2]*s]; },
+  cross : function(v1,v2) { return [
+          v1[1]*v2[2] - v1[2]*v2[1],
+          v1[2]*v2[0] - v1[0]*v2[2],
+          v1[0]*v2[1] - v1[1]*v2[0] ]; },
+  unit : function(v) { return this.scale(v,1/this.norm(v)); }
+}
+
+var q = {
+  quaternion : function(vec) { return [0].concat(vec); },
+  rotation : function( a, vec ) { var a2=a/2, sina2=Math.sin(a2);
+             return [Math.cos(a2), vec[0]*sina2, vec[1]*sina2, vec[2]*sina2 ]; },
+  safe_rotation : function( a, vec ) { return q.rotation(a,v.unit( vec )); },
+  rotate : function( vec, rot ) { return q.mul(q.mul(rot,q.quaternion(vec)),q.conjugate(rot)).slice(1); },
+  norm : function(q) { var w=q[0],x=q[1],y=q[2],z=q[3]; return Math.sqrt(w*w+x*x+y*y+z*z); },
+  conjugate : function(q) { return [q[0],-q[1],-q[2],-q[3]] },
+  mul : function(q1,q2) { return [
+        q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3],
+        q1[0]*q2[1] + q1[1]*q2[0] - q1[2]*q2[3] + q1[3]*q2[2],
+        q1[0]*q2[2] + q1[1]*q2[3] + q1[2]*q2[0] - q1[3]*q2[1],
+        q1[0]*q2[3] - q1[1]*q2[2] + q1[2]*q2[1] + q1[3]*q2[0] ]; },
+}
+
+start()
+
+function start() {
+  canvas = document.getElementById("c");
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+
+  gl = canvas.getContext("experimental-webgl");
+
+  if (gl) {
+    gl.clearColor(0.0,0,0, 1.0);  // Clear to black, fully opaque
+    gl.clearDepth(1.0);                 // Clear everything
+    gl.enable(gl.DEPTH_TEST);           // Enable depth testing
+    gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
+
+    gl.enable( gl.BLEND );
+    gl.blendEquation( gl.FUNC_ADD );
+    gl.blendFunc( gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA );
+
+    // init shaders
+    var fragmentShader = getShader(gl, "shader-fs");
+    var vertexShader = getShader(gl, "shader-vs");
+
+    shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+    gl.linkProgram(shaderProgram);
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS))
+      throw new Error("Shader program failed to link.");
+
+    gl.useProgram(shaderProgram);
+
+    shaderProgram.positionAttribute = gl.getAttribLocation(shaderProgram, "position");
+    gl.enableVertexAttribArray(shaderProgram.positionAttribute);
+
+    shaderProgram.otherAttribute = gl.getAttribLocation(shaderProgram, "other");
+    gl.enableVertexAttribArray(shaderProgram.otherAttribute);
+
+    shaderProgram.coordAttribute = gl.getAttribLocation(shaderProgram, "coord");
+    gl.enableVertexAttribArray(shaderProgram.coordAttribute);
+
+    positionBuffer = gl.createBuffer();
+    otherBuffer = gl.createBuffer();
+    coordBuffer = gl.createBuffer();
+
+    generateGeometry();
+
+    render();
+    setInterval(generateGeometry, resetInterval);
+  }
+}
+
+function generateGeometry() {
+  var cp=[], points=[], positions=[], others=[], coords=[];
+  var p = [radius, 0, 0];
+  for (var i=0; i<N; i++)
+    cp.push(p = randPoint(p, spread));
+
+  for (var i=0; i<N; i+=1) {
+    var cPoints = [
+      mix(cp[i], cp[(i+1)%N], .5),
+      cp[(i+1)%N],
+      mix(cp[(i+1)%N], cp[(i+2)%N], .5)
+    ]
+    console.log(cPoints)
+    for (var j=0; j<Ns; j++)
+      points.push(spline(j/(Ns-1), cPoints));
+  }
+
+  var endpoints = points.length - 1;
+  for (var i=0; i<points.length; i++)
+    pushLine(points[i], points[(i+1)%(N*Ns)], i/endpoints, (i+1)/endpoints, positions, others, coords);
+
+  Ntriangles = 6*points.length-3;
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, otherBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(others), gl.STATIC_DRAW);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, coordBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coords), gl.STATIC_DRAW);
+}
+
+function spline(s, cPoints) {
+  var mp = mix(cPoints[0], cPoints[1], s);
+  if (cPoints.length == 2)
+    return mp;
+  return mix(mp, spline(s, cPoints.slice(1)), s);
+}
+
+function mix(p1,p2,s) { return p1.map(function(p,i) { return lerp(p,p2[i],s); }) }
+function lerp(a, b, x) { return a + x*(b-a); }
+
+function randInt(n) { return Math.floor(n*Math.random()); }
+
+function pushLine(p1, p2, tc1, tc2, positions, others, coords) {
+  positions.push.apply(positions, p1);
+  positions.push.apply(positions, p1);
+  positions.push.apply(positions, p2);
+  positions.push.apply(positions, p2);
+  positions.push.apply(positions, p2);
+  positions.push.apply(positions, p1);
+
+  others.push.apply(others, p2);
+  others.push.apply(others, p2);
+  others.push.apply(others, p1);
+  others.push.apply(others, p1);
+  others.push.apply(others, p1);
+  others.push.apply(others, p2);
+
+  coords.push(1,1,tc1,-1,1,tc1,1,-1,tc2,-1,-1,tc2,1,-1,tc2,-1,1,tc1);
+}
+
+function randPoint(p, d) {
+  return q.rotate(p, q.safe_rotation(d*Math.random()*2*Math.PI, [negRand(), negRand(), negRand()]));
+}
+
+function negRand() { return Math.random() * 2 - 1; }
+
+var time = 0;
+function render() {
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  perspectiveMatrix = makePerspective(45, canvas.width/canvas.height, 0.1, 4000.0);
+
+  mvMatrix = Matrix.I(4);
+
+  var r = cameraR + cameraDelta *Math.cos(time*cameraFreq);
+  var camera = [r*Math.sin(time), 0, -r*Math.cos(time)];
+  time += dt;
+
+  gl.lineWidth(20.0);
+
+  mvMatrix = mvMatrix
+    .x(makeLookAt(camera[0], camera[1], camera[2], 0, 0, 0, 0, 1.0, 0))
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.vertexAttribPointer(shaderProgram.positionAttribute, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, otherBuffer);
+  gl.vertexAttribPointer(shaderProgram.otherAttribute, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, coordBuffer);
+  gl.vertexAttribPointer(shaderProgram.coordAttribute, 3, gl.FLOAT, false, 0, 0);
+
+  var pUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+  gl.uniformMatrix4fv(pUniform, false, new Float32Array(perspectiveMatrix.flatten()));
+
+  var mvUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+  gl.uniformMatrix4fv(mvUniform, false, new Float32Array(mvMatrix.flatten()));
+
+  var cameraUniform = gl.getUniformLocation(shaderProgram, "camera");
+  gl.uniform3fv(cameraUniform, new Float32Array(camera));
+
+  var lineWidthUniform = gl.getUniformLocation(shaderProgram, "lineWidth");
+  gl.uniform1f(lineWidthUniform, lineWidth);
+
+  var thetaUniform = gl.getUniformLocation(shaderProgram, "theta");
+  gl.uniform1f(thetaUniform, time);
+
+  gl.drawArrays(gl.TRIANGLES, 0, Ntriangles);
+
+  requestAnimationFrame(render);
+}
+
+function getShader(gl, id) {
+  var shaderScript = document.getElementById(id);
+  var source = [];
+  var currentChild = shaderScript.firstChild;
+  var shader;
+
+  while(currentChild) {
+    if (currentChild.nodeType == 3)
+      source.push( currentChild.textContent );
+    currentChild = currentChild.nextSibling;
+  }
+
+  if (shaderScript.type == "x-shader/x-fragment") {
+    shader = gl.createShader(gl.FRAGMENT_SHADER);
+  } else if (shaderScript.type == "x-shader/x-vertex") {
+    shader = gl.createShader(gl.VERTEX_SHADER);
+  }
+
+  gl.shaderSource(shader, source.join(''));
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error("An error occurred compiling the shaders: " + gl.getShaderInfoLog(shader));
+    throw new Error("GL Compilation Error");
+  }
+  return shader;
+}
+
+  </script>
+</html>
