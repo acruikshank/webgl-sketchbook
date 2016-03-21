@@ -177,7 +177,6 @@ function generateGeometry() {
       cp[(i+1)%N],
       mix(cp[(i+1)%N], cp[(i+2)%N], .5)
     ]
-    console.log(cPoints)
     for (var j=0; j<Ns; j++)
       points.push(spline(j/(Ns-1), cPoints));
   }
