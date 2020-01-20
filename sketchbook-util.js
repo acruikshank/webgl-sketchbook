@@ -50,15 +50,19 @@ function ReBuffer(gl, count, size, options) {
 }
 
 var SketchbookUtil = (function() {
-  function startWebcam(video, next) {
-    navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
-                            || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-    navigator.getUserMedia({audio:false,video:true}, function(stream) {
-      video.src=URL.createObjectURL(stream);
-      video.addEventListener('canplay', start);
-    }, function(err) { console.log(err); });
+  async function startWebcam() {
+    let stream = null;
+  
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({video: true});
+      var video=document.getElementById("v");
+      video.srcObject=stream
+      start()
+    } catch(err) {
+      console.log(err)
+    }
   }
-
+  
   function createProgram(gl, vertex, fragment) {
     var libraryScripts = document.querySelectorAll("script[type='x-shader/x-library']");
     for (var i=0, libraries={}, script; script = libraryScripts[i]; i++)

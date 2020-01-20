@@ -116,13 +116,19 @@ var time = Math.random();
 var videoBuffer, downsampleBuffers = [];
 var timeRate = 0.0004;
 
-navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
-                        || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-navigator.getUserMedia({audio:false,video:true}, function(stream) {
-  var video=document.getElementById("v");
-  video.src=URL.createObjectURL(stream);
-  video.addEventListener('canplay', start);
-}, function(err) { console.log(err); });
+async function getMedia(constraints) {
+  let stream = null;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video: true});
+    var video=document.getElementById("v");
+    video.srcObject=stream
+    start()
+  } catch(err) {
+    console.log(err)
+  }
+}
+getMedia()
 
 function start() {
   canvas = document.getElementById("glcanvas");

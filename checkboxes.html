@@ -1,0 +1,77 @@
+<html>
+  <head>
+    <title>checked</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style type="text/css">
+      video {position: absolute; visibility: hidden; }
+      canvas {position: absolute; visibility: hidden; }
+    </style>
+  </head>
+
+  <body>
+    <video id="v" autoplay width="640" height="480"></video>
+    <canvas id="c"></canvas>
+  </body>
+  <script>
+
+var checkboxes = [];
+var canvas = document.getElementById('c');
+var WIDTH = 69;
+var HEIGHT = 43;
+canvas.width = WIDTH;
+canvas.height = HEIGHT;
+var ctx = canvas.getContext('2d');
+var video=document.getElementById("v");
+
+async function getMedia(constraints) {
+  let stream = null;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video: true});
+    var video=document.getElementById("v");
+    video.srcObject=stream
+    start()
+  } catch(err) {
+    console.log(err)
+  }
+}
+getMedia()
+
+function start() {
+  for (var i=0; i<HEIGHT; i++) {
+    var row = [];
+    for (var j=0; j<WIDTH; j++) {
+      var checkbox = document.createElement('input');
+      checkbox.setAttribute('type', 'radio');
+      document.body.appendChild(checkbox);
+      row.push(checkbox);
+    }
+    document.body.appendChild(document.createElement('br'));
+    checkboxes.push(row);
+  }
+
+  animate()
+}
+
+function render() {
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  var frame = ctx.getImageData(0,0, canvas.width, canvas.height);
+  var l = frame.data.length / 4;
+
+  for (var i = 0; i < HEIGHT; i++) {
+    for (var j=0; j < WIDTH; j++) {
+      var index = i*WIDTH + WIDTH - j - 1;
+      var r = frame.data[index * 4 + 0];
+      var g = frame.data[index * 4 + 1];
+      var b = frame.data[index * 4 + 2];
+      checkboxes[i][j].checked = r + g + b < 350;
+    }
+  }
+}
+
+function animate() {
+  render();
+  requestAnimationFrame(animate);
+}
+  </script>
+</html>

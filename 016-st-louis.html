@@ -145,7 +145,7 @@
         vec2 floorCoord = floor(texCoord * 16.0) / 16.0;
 
         vec4 color = texture2D(video, vec2(1.0,0.0)-vec2(1.0,-1.0)*texCoord);
-        float brightness = 40.0*(0.5*(color.r+color.g+color.b) - .5*(1.0 + snoise(vec3(1000.0*floorCoord + 20.0*texCoord, time))));
+        float brightness = 5.0*(.5*(color.r+color.g+color.b) - pow(1.00*(1.0 + snoise(vec3(1.5*floorCoord + vec2(.5,.25)*texCoord+vec2(.3,.4)*time, .5))),128.0));
         gl_FragColor = vec4(vec3(brightness*brightness), 1.0);
       }
     </script>
@@ -177,13 +177,19 @@ var time = Math.random();
 var videoBuffer, downsampleBuffers = [];
 var timeRate = 0.002;
 
-navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia
-                        || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-navigator.getUserMedia({audio:false,video:true}, function(stream) {
-  var video=document.getElementById("v");
-  video.src=URL.createObjectURL(stream);
-  video.addEventListener('canplay', start);
-}, function(err) { console.log(err); });
+async function getMedia(constraints) {
+  let stream = null;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video: true});
+    var video=document.getElementById("v");
+    video.srcObject=stream
+    start()
+  } catch(err) {
+    console.log(err)
+  }
+}
+getMedia()
 
 function start() {
   canvas = document.getElementById("glcanvas");
